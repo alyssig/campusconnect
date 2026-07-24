@@ -1,0 +1,11 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+*.swp
+
+# Temporary/debug files
+debug-*.html
+*-before-*.html

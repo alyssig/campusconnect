@@ -1,0 +1,2901 @@
+<!--
+  CampusConnect — Platform Prototype
+  ===================================
+  Built by Alyssia Gaston (@alyssig), Computer Science student at UofSC.
+
+  What this is: a single-file, front-end-only prototype of CampusConnect —
+  a map, social feed, groups/DMs, events, study spot & dining directories,
+  content moderation, and a full trust & safety system, all in one place,
+  built to replace the patchwork of apps (GroupMe, word of mouth, etc.)
+  UofSC students currently piece campus life together with.
+
+  Architecture: no framework, no build step — vanilla HTML/CSS/JS in one
+  file so it can be opened directly in a browser or dropped straight onto
+  Netlify. All state (posts, ratings, friends, RSVPs, saved spots) lives
+  in memory in the JavaScript section below and resets on refresh. That's
+  intentional for this stage — the real backend (Supabase: Postgres +
+  auth + storage) is the deliberate last step, once every feature is
+  fully designed and working against fake data first.
+
+  Design system: garnet (#73000A) / black (#0B0B0C) / white — a "legal
+  brief meets code terminal" identity carried through every page: §
+  section markers, REF/CC-XX reference codes, terminal window chrome,
+  and a hand-illustrated campus map instead of a real geodata map.
+
+  Known limitations (all intentional, not bugs):
+  - No persistence — refreshing the page resets everything.
+  - No real accounts — the "Alyssia Gaston" profile is a hardcoded demo user.
+  - The slur/profanity filter is a client-side word list for demo purposes
+    only; real moderation needs to run server-side (see the comment above
+    flaggedTerms further down for the full reasoning).
+  - Busy/quiet indicators are a time-of-day heuristic, not real foot traffic.
+  - Dark mode is a first pass — most elements are covered, a few decorative
+    corners may not be pixel-perfect yet.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CampusConnect | Platform Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Caveat:wght@600;700&family=Kalam:wght@400;700&family=Baloo+2:wght@600;700;800&family=Anton&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --white:#FFFFFF; --paper:#F6F5F3; --black:#0B0B0C;
+    --garnet:#73000A; --garnet-deep:#4A0007; --line:#D9D6D1; --gray:#55524D;
+    --amber:#73000A; --indigo:#0B0B0C; --teal:#4A0007; --forest:#0B0B0C; --plum:#0B0B0C;
+    --cream:#FFFFFF; --cream-card:#FFFFFF;
+  }
+  body.dark-mode{
+    --white:#161616; --paper:#1e1e1e; --black:#F2EFEA;
+    --garnet:#C4444F; --garnet-deep:#a3323f; --line:#3a3a3a; --gray:#a8a29a;
+    --amber:#C4444F; --indigo:#F2EFEA; --teal:#a3323f; --forest:#F2EFEA; --plum:#F2EFEA;
+    --cream:#161616; --cream-card:#1e1e1e;
+  }
+  body.dark-mode{
+    background: radial-gradient(circle at 1px 1px, rgba(242,239,234,0.06) 1px, transparent 0) 0 0/24px 24px, #101010;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{
+    background: radial-gradient(circle at 1px 1px, rgba(11,11,12,0.06) 1px, transparent 0) 0 0/24px 24px, var(--white);
+    color:var(--black); font-family:'Inter',sans-serif; line-height:1.6; transition:background .2s ease, color .2s ease;
+  }
+  h1,h2,h3{ font-family:'Source Serif 4', Georgia, serif; font-weight:500; letter-spacing:-0.01em; }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+  .app{ max-width:1000px; margin:0 auto; min-height:100vh; background:var(--white); box-shadow:0 0 80px rgba(11,11,12,0.06); position:relative; z-index:1; transition:background .2s ease; }
+  .side-rail{
+    position:fixed; top:0; bottom:0; width:calc(50vw - 500px); z-index:0;
+    background:repeating-linear-gradient(-45deg, rgba(115,0,10,0.05) 0 3px, transparent 3px 14px);
+    display:flex; flex-direction:column; align-items:center; justify-content:space-evenly; overflow:hidden;
+  }
+  .side-rail.left{ left:0; border-right:1px solid var(--line); }
+  .side-rail.right{ right:0; border-left:1px solid var(--line); }
+  .side-rail span{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.25em; color:var(--line);
+    writing-mode:vertical-rl; text-transform:uppercase;
+  }
+  .side-rail .dot{ width:5px; height:5px; border-radius:50%; background:var(--garnet); opacity:0.35; }
+  @media (max-width:1100px){ .side-rail{ display:none; } }
+
+  .letterhead{ background:#0B0B0C; color:#C9A9AB; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.06em; padding:7px 24px; display:flex; justify-content:space-between; }
+  header{ padding:24px 24px 0; }
+  .brand{ display:flex; align-items:center; gap:10px; font-size:24px; font-weight:700; margin-bottom:18px; }
+  .brand span.mark{ width:11px; height:11px; background:var(--garnet); display:inline-block; }
+  nav{ display:flex; gap:4px; border-bottom:1px solid var(--line); overflow-x:auto; }
+  nav button{
+    font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; letter-spacing:0.02em;
+    background:none; border:none; padding:12px 18px; cursor:pointer; color:var(--gray); white-space:nowrap;
+    border-bottom:2px solid transparent; margin-bottom:-1px; transition:color .15s ease, border-color .15s ease, transform .15s ease;
+    display:inline-flex; align-items:center; gap:7px;
+  }
+  nav button.active{ color:var(--garnet); border-bottom-color:var(--garnet); transform:translateY(-1px); }
+  nav button:hover:not(.active){ color:var(--black); transform:translateY(-1px); }
+
+  main{ padding:28px 24px 60px; }
+  .page{ display:none; }
+  .page.active{ display:block; animation:pageFade .35s ease; }
+  @keyframes pageFade{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:translateY(0); } }
+  .page-head{ margin-bottom:26px; }
+  .page-head::before{ content:""; display:block; width:56px; height:2.5px; background:var(--garnet); margin-bottom:14px; }
+  .page-head h2{ font-size:32px; margin-bottom:6px; }
+  .page-head p{ color:var(--gray); font-size:14.5px; }
+
+  /* ---------- MAP ---------- */
+  .map-wrap{ background:var(--black); border-radius:10px; overflow:hidden; box-shadow:0 20px 40px -20px rgba(0,0,0,0.35); }
+  .map-bar{ display:flex; align-items:center; justify-content:space-between; padding:11px 16px; background:#1A1A1B; border-bottom:1px solid #2A2A2B; }
+  .map-bar-left{ display:flex; align-items:center; gap:8px; }
+  .dot{ width:9px; height:9px; border-radius:50%; }
+  .map-hint{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#8a8a8c; }
+  .map-viewport{ position:relative; height:400px; overflow:hidden; cursor:grab; background:#12100e; }
+  .map-viewport.dragging{ cursor:grabbing; }
+  .map-canvas{ position:absolute; width:1500px; height:950px; left:0; top:0; }
+  .map-canvas svg{ position:absolute; inset:0; width:100%; height:100%; }
+  .building{ position:absolute; }
+  .building .dot-mark{ width:18px; height:18px; border-radius:50% 50% 50% 0; background:var(--garnet); transform:rotate(-45deg); border:2px solid var(--white); cursor:pointer; box-shadow:0 3px 8px rgba(0,0,0,0.5); }
+  .building.you .dot-mark{ background:#0B0B0C; }
+  .building .pin-label{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:#e8e2da; margin-top:4px; white-space:nowrap; pointer-events:none; }
+  .zoom-controls{ position:absolute; right:14px; bottom:14px; display:flex; flex-direction:column; gap:1px; z-index:5; }
+  .zoom-controls button{ width:30px; height:30px; background:#1A1A1B; color:var(--white); border:1px solid #2A2A2B; font-size:16px; cursor:pointer; }
+
+  .map-info{ margin-top:14px; border:1px solid var(--line); background:var(--paper); padding:18px; display:none; }
+  .map-info.show{ display:flex; gap:18px; }
+  .building-preview{ width:130px; height:100px; flex-shrink:0; background:var(--black); display:flex; align-items:center; justify-content:center; border:1px solid var(--line); }
+  .map-info-body{ flex:1; }
+  .map-info .tag{ font-family:'IBM Plex Mono',monospace; font-size:10px; font-weight:700; letter-spacing:0.05em; color:var(--garnet); border:1px solid var(--garnet); padding:2px 8px; }
+  .map-info h3{ font-size:17px; margin:8px 0 6px; }
+  .map-info p{ font-size:13.5px; color:var(--gray); margin-bottom:8px; }
+  .route-line{ display:flex; align-items:center; gap:6px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--garnet); font-weight:600; }
+
+  .map-toggle-btn{ font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; padding:9px 16px; border:1px solid var(--line); background:var(--white); color:var(--gray); cursor:pointer; }
+  .map-toggle-btn.active{ background:var(--black); color:var(--white); border-color:var(--black); }
+  .map-search-wrap{ position:relative; margin-bottom:14px; }
+  .map-search-input{
+    width:100%; padding:11px 14px; border:1px solid var(--line); font-family:'IBM Plex Mono',monospace;
+    font-size:13px; outline:none; background:var(--white);
+  }
+  .map-search-input:focus{ border-color:var(--garnet); }
+  .map-search-results{
+    position:absolute; top:calc(100% + 2px); left:0; right:0; background:var(--white); border:1px solid var(--line);
+    box-shadow:0 10px 20px rgba(0,0,0,0.12); z-index:20; display:none; max-height:240px; overflow-y:auto;
+  }
+  .map-search-results.show{ display:block; }
+  .map-search-result-item{
+    padding:10px 14px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between;
+  }
+  .map-search-result-item:last-child{ border-bottom:none; }
+  .map-search-result-item:hover{ background:var(--paper); }
+  .map-search-result-item .tag{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--garnet); }
+  .map-search-empty{ padding:12px 14px; font-size:12.5px; color:var(--gray); font-family:'IBM Plex Mono',monospace; }
+  .building.dimmed .dot-mark{ opacity:0.2; }
+  .building.dimmed .pin-label{ opacity:0.2; }
+  .building.highlighted .dot-mark{ box-shadow:0 0 0 5px rgba(115,0,10,0.35); transform:scale(1.2); }
+  .issue-pin-mark{
+    width:20px; height:20px; border-radius:50%; background:var(--garnet); border:2px solid var(--white);
+    display:flex; align-items:center; justify-content:center; font-size:11px; color:#fff; cursor:pointer;
+    box-shadow:0 3px 6px rgba(0,0,0,0.5); animation:issuePulse 1.6s ease-in-out infinite;
+  }
+  @keyframes issuePulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(115,0,10,0.5), 0 3px 6px rgba(0,0,0,0.5); } 50%{ box-shadow:0 0 0 6px rgba(115,0,10,0), 0 3px 6px rgba(0,0,0,0.5); } }
+  .satellite-wrap{ border-radius:10px; overflow:hidden; box-shadow:0 20px 40px -20px rgba(0,0,0,0.35); }
+  .satellite-note{ font-size:11.5px; color:var(--gray); margin-top:10px; }
+  .satellite-note a{ color:var(--garnet); }
+
+  /* ---------- FEED (real pinboard aesthetic) ---------- */
+  .corkboard{
+    position:relative;
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E"),
+      radial-gradient(circle at 12% 22%, rgba(0,0,0,0.09) 0, transparent 3px),
+      radial-gradient(circle at 68% 15%, rgba(0,0,0,0.08) 0, transparent 2.5px),
+      radial-gradient(circle at 34% 48%, rgba(0,0,0,0.07) 0, transparent 3px),
+      radial-gradient(circle at 82% 58%, rgba(0,0,0,0.08) 0, transparent 2px),
+      radial-gradient(circle at 55% 72%, rgba(0,0,0,0.07) 0, transparent 3px),
+      radial-gradient(circle at 20% 88%, rgba(0,0,0,0.06) 0, transparent 2.5px),
+      radial-gradient(circle at 90% 90%, rgba(0,0,0,0.07) 0, transparent 2px),
+      radial-gradient(circle at 5% 60%, rgba(0,0,0,0.06) 0, transparent 2px),
+      radial-gradient(circle at 45% 10%, rgba(0,0,0,0.06) 0, transparent 2px),
+      linear-gradient(160deg, #CBA679, #A9835A 55%, #96754F);
+    background-blend-mode:overlay, normal, normal, normal, normal, normal, normal, normal, normal, normal;
+    border-radius:10px; padding:32px 26px;
+    box-shadow:inset 0 0 60px rgba(36,22,17,0.5), inset 0 2px 24px rgba(36,22,17,0.35), 0 12px 30px rgba(36,22,17,0.25);
+    border:6px solid var(--garnet-deep);
+    overflow:hidden;
+  }
+  .board-sticker{ position:absolute; pointer-events:none; z-index:1; filter:drop-shadow(0 6px 9px rgba(0,0,0,0.4)) drop-shadow(0 2px 3px rgba(0,0,0,0.25)); max-width:210px; width:max-content; }
+  .composer{ display:flex; gap:10px; background:var(--cream-card); padding:12px; margin-bottom:26px; border-radius:2px; box-shadow:0 8px 18px rgba(36,22,17,0.3); position:relative; z-index:2; }
+  .composer::before{ content:""; position:absolute; top:-9px; left:24px; width:54px; height:18px; background:repeating-linear-gradient(-45deg, rgba(115,0,10,0.18) 0 4px, rgba(115,0,10,0.08) 4px 8px); transform:rotate(-3deg); box-shadow:0 1px 2px rgba(0,0,0,0.15); }
+  .composer select{ font-family:'IBM Plex Mono',monospace; font-size:12px; border:1px solid var(--line); background:var(--white); }
+  .composer input{ flex:1; border:none; outline:none; font-family:'IBM Plex Mono',monospace; font-size:13px; }
+  .composer input:focus-visible{ outline:2px solid var(--garnet); outline-offset:2px; }
+  .composer button{ background:var(--garnet); color:var(--white); border:none; padding:9px 16px; font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; cursor:pointer; }
+  .composer button:hover{ background:var(--garnet-deep); }
+
+  .cork-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:34px 26px; position:relative; z-index:2; }
+  @media (max-width:760px){ .cork-grid{ grid-template-columns:repeat(2,1fr); } }
+  .note{ background:var(--cream-card); padding:18px 16px 16px; position:relative; box-shadow:0 10px 20px rgba(36,22,17,0.3); transition:transform .18s ease, box-shadow .18s ease; }
+  .note:nth-child(4n+1){ transform:rotate(-2deg); }
+  .note:nth-child(4n+2){ transform:rotate(1.5deg); }
+  .note:nth-child(4n+3){ transform:rotate(-1deg); }
+  .note:nth-child(4n){ transform:rotate(2deg); }
+  .note:hover{ transform:rotate(0deg) translateY(-6px) scale(1.02); box-shadow:0 20px 34px rgba(0,0,0,0.35); z-index:3; }
+  .note::before{
+    content:""; position:absolute; top:-11px; left:50%; transform:translateX(-50%);
+    width:16px; height:16px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #a3323f, var(--garnet) 60%, var(--garnet-deep));
+    box-shadow:0 3px 5px rgba(0,0,0,0.45), inset -1px -1px 2px rgba(0,0,0,0.3);
+  }
+  .note:nth-child(3n)::before{
+    background:radial-gradient(circle at 35% 30%, #2a2a2a, var(--black) 60%, #000);
+  }
+  .note-tag{ font-family:'IBM Plex Mono',monospace; font-size:9.5px; font-weight:700; letter-spacing:0.04em; padding:4px 11px; border-radius:12px; display:inline-block; margin-bottom:8px; }
+  .own-post-controls{ float:right; display:flex; gap:4px; }
+  .own-post-controls button{ background:none; border:none; cursor:pointer; font-size:13px; padding:2px 4px; opacity:0.6; }
+  .own-post-controls button:hover{ opacity:1; }
+  .edit-post-textarea{ width:100%; min-height:70px; border:1px solid var(--garnet); padding:8px; font-family:'Inter',sans-serif; font-size:13px; margin-bottom:8px; outline:none; }
+  .edit-post-actions{ display:flex; gap:8px; margin-bottom:10px; }
+  .btn-ghost-small{ background:none; border:1px solid var(--line); color:var(--gray); padding:8px 14px; font-family:'IBM Plex Mono',monospace; font-size:12px; cursor:pointer; }
+  .note h3{ font-size:15px; margin-bottom:6px; }
+  .note p{ font-size:12.5px; color:var(--gray); margin-bottom:10px; }
+  .note-foot{ display:flex; justify-content:space-between; align-items:center; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--gray); }
+  .vote-btn{ background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:4px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; color:var(--gray); }
+  .vote-btn.voted{ color:var(--garnet); }
+  .comment-toggle{ background:none; border:none; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--gray); text-decoration:underline; margin-top:8px; }
+  .comment-thread{ display:none; margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; }
+  .comment-thread.show{ display:block; }
+  .comment{ font-size:12px; color:var(--gray); margin-bottom:6px; }
+  .comment strong{ color:var(--black); }
+
+  /* ---------- ORIGINAL UOFSC-SPIRIT STICKERS ---------- */
+  .sticker-badge{
+    width:74px; height:74px; border-radius:50%; background:radial-gradient(circle at 35% 30%, #8a3540, var(--garnet) 55%, var(--garnet-deep));
+    display:flex; align-items:center; justify-content:center; text-align:center; color:var(--white);
+    font-family:'Baloo 2',cursive; font-weight:700; font-size:12px; line-height:1.25; padding:6px;
+    border:2px solid rgba(255,255,255,0.85); transform:rotate(-8deg);
+  }
+  .sticker-pennant{
+    width:64px; height:80px; background:var(--black); clip-path:polygon(0 0,100% 0,100% 65%,50% 100%,0 65%);
+    display:flex; align-items:flex-start; justify-content:center; padding-top:14px;
+    color:var(--white); font-family:'Baloo 2',cursive; font-weight:700; font-size:14px; transform:rotate(6deg);
+  }
+  .sticker-ticket{
+    width:100px; padding:8px 10px; background:var(--cream-card); border:1.5px dashed var(--garnet);
+    font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--garnet-deep); text-align:center;
+    transform:rotate(-4deg); box-shadow:0 4px 8px rgba(0,0,0,0.2);
+  }
+  .sticker-ticket .big{ font-family:'Baloo 2',cursive; font-weight:700; font-size:16px; color:var(--garnet); display:block; margin:2px 0; }
+  .sticker-note{
+    font-family:'Caveat', cursive; font-weight:700; font-size:22px; color:var(--garnet-deep);
+    background:var(--cream-card); padding:6px 14px; box-shadow:0 4px 10px rgba(0,0,0,0.2); transform:rotate(4deg);
+    width:fit-content; white-space:nowrap;
+  }
+  .sticker-gamecock{ width:56px; height:56px; transform:rotate(-5deg); }
+  .sticker-gamecock svg{ width:100%; height:100%; }
+  .washi-corner{
+    position:absolute; width:60px; height:20px;
+    background:repeating-linear-gradient(-45deg, rgba(11,11,12,0.15) 0 4px, rgba(215,196,168,0.9) 4px 8px);
+    box-shadow:0 1px 2px rgba(0,0,0,0.15); z-index:2;
+  }
+
+  /* ---------- REALISTIC EPHEMERA ---------- */
+  .sticker-calendar{
+    width:132px; background:#FBF7F0; box-shadow:0 6px 16px rgba(0,0,0,0.35); transform:rotate(3deg); font-family:'Inter',sans-serif;
+  }
+  .sticker-calendar .cal-head{ background:var(--garnet); color:#fff; text-align:center; font-family:'Baloo 2',cursive; font-weight:800; font-size:17px; padding:6px 0 4px; letter-spacing:1px; }
+  .sticker-calendar .cal-sub{ text-align:center; font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--gray); padding:3px 0; border-bottom:1px solid var(--line); }
+  .sticker-calendar .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:1px; padding:6px 5px; }
+  .sticker-calendar .cal-grid span{ font-size:7.5px; text-align:center; color:var(--gray); font-family:'IBM Plex Mono',monospace; padding:1.5px 0; }
+  .sticker-calendar .cal-grid span.star{ background:var(--garnet); color:#fff; border-radius:50%; font-weight:700; }
+
+  .sticker-receipt{
+    width:150px; background:#FAF6EC; box-shadow:0 8px 18px rgba(0,0,0,0.35); transform:rotate(-3deg);
+    clip-path:polygon(0 0,100% 0,100% 97%,95% 100%,90% 97%,85% 100%,80% 97%,75% 100%,70% 97%,65% 100%,60% 97%,55% 100%,50% 97%,45% 100%,40% 97%,35% 100%,30% 97%,25% 100%,20% 97%,15% 100%,10% 97%,5% 100%,0 97%);
+    padding:12px 12px 18px; font-family:'IBM Plex Mono',monospace;
+  }
+  .sticker-receipt .r-head{ text-align:center; font-family:'Baloo 2',cursive; font-weight:700; font-size:14px; color:var(--garnet-deep); line-height:1.3; }
+  .sticker-receipt .r-loc{ text-align:center; font-size:8px; color:var(--gray); margin-bottom:6px; }
+  .sticker-receipt .r-line{ display:flex; justify-content:space-between; font-size:8.5px; color:var(--black); border-bottom:1px dashed #ccc4b4; padding:2px 0; }
+  .sticker-receipt .r-note{ font-family:'Caveat',cursive; font-weight:700; font-size:15px; color:var(--garnet); margin-top:6px; text-align:center; line-height:1.2; }
+
+  .sticker-photostrip{ width:96px; background:#fff; padding:6px 6px 14px; box-shadow:0 8px 18px rgba(0,0,0,0.35); transform:rotate(2deg); }
+  .sticker-photostrip .frame{ width:100%; aspect-ratio:1.3/1; background:var(--black); margin-bottom:5px; display:flex; align-items:center; justify-content:center; }
+  .sticker-photostrip .frame svg{ width:55%; height:55%; opacity:0.9; }
+  .sticker-photostrip .caption{ text-align:center; font-family:'Caveat',cursive; font-weight:700; font-size:13px; color:var(--garnet-deep); margin-top:2px; }
+
+  .sticker-ribbon{ width:60px; transform:rotate(-6deg); filter:drop-shadow(0 4px 5px rgba(0,0,0,0.3)); }
+  .sticker-ribbon svg{ width:100%; height:auto; }
+
+  .sticker-stamp{
+    width:56px; height:56px; background:#FAF6EC; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 10px rgba(0,0,0,0.3); transform:rotate(-10deg);
+    -webkit-mask-image:radial-gradient(circle 3px at 4px 4px, transparent 3px, black 3.5px);
+    -webkit-mask-size:8px 8px; mask-image:radial-gradient(circle 3px at 4px 4px, transparent 3px, black 3.5px); mask-size:8px 8px;
+    border:1px solid #d8cdb4;
+  }
+  .sticker-stamp svg{ width:60%; height:60%; }
+
+  .sticker-doodle{ width:34px; height:34px; opacity:0.9; }
+
+  .sticker-caution{
+    width:190px; padding:6px 10px; text-align:center; transform:rotate(-3deg);
+    background:repeating-linear-gradient(45deg, var(--black) 0 14px, var(--garnet) 14px 28px);
+    color:#fff; font-family:'Baloo 2',cursive; font-weight:800; font-size:12px; letter-spacing:1px;
+    box-shadow:0 5px 12px rgba(0,0,0,0.35); text-shadow:0 1px 2px rgba(0,0,0,0.4);
+  }
+
+  .sticker-id{
+    width:130px; background:#FBF7F0; border-radius:6px; overflow:hidden; box-shadow:0 8px 18px rgba(0,0,0,0.35); transform:rotate(4deg);
+  }
+  .sticker-id .id-head{ background:var(--black); color:#fff; font-family:'Baloo 2',cursive; font-weight:700; font-size:10px; padding:4px 8px; letter-spacing:0.5px; }
+  .sticker-id .id-body{ display:flex; gap:8px; padding:8px; align-items:center; }
+  .sticker-id .id-photo{ width:34px; height:34px; border-radius:50%; background:var(--garnet); color:#fff; display:flex; align-items:center; justify-content:center; font-family:'Source Serif 4',serif; font-weight:700; font-size:13px; flex-shrink:0; }
+  .sticker-id .id-name{ font-family:'Inter',sans-serif; font-weight:700; font-size:10.5px; color:var(--black); }
+  .sticker-id .id-meta{ font-family:'IBM Plex Mono',monospace; font-size:7.5px; color:var(--gray); margin-top:2px; }
+
+  .sticker-star{ opacity:0.9; }
+  .sticker-arrow{
+    background:#FBF7F0; padding:6px 12px; font-family:'Kalam',cursive; font-weight:700; font-size:13px;
+    color:var(--garnet-deep); box-shadow:0 5px 10px rgba(0,0,0,0.3); transform:rotate(-4deg);
+    clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%);
+  }
+  .collage-strip{ position:relative; height:230px; margin-top:26px; }
+  @media (max-width:700px){ .collage-strip{ height:360px; } }
+
+  .sticky-note{
+    background:var(--white); border:1px solid var(--line); padding:12px 16px; max-width:150px;
+    font-family:'Caveat',cursive; font-weight:700; font-size:18px; color:var(--garnet-deep);
+    box-shadow:0 6px 14px rgba(11,11,12,0.18); transform:rotate(-2deg);
+  }
+  .sticky-note:nth-child(odd){ transform:rotate(2deg); }
+  .sticky-note.note-black{ background:var(--black); color:var(--white); }
+  .washi-strip{
+    width:60px; height:20px;
+    background:repeating-linear-gradient(-45deg, rgba(11,11,12,0.15) 0 4px, rgba(115,0,10,0.12) 4px 8px);
+    border:1px solid var(--line); box-shadow:0 2px 4px rgba(0,0,0,0.12); z-index:2;
+  }
+  .pin-dot{
+    width:12px; height:12px; border-radius:50%; z-index:3;
+    background:radial-gradient(circle at 35% 30%, #a3323f, var(--garnet) 60%, var(--garnet-deep));
+    box-shadow:0 2px 4px rgba(0,0,0,0.4);
+  }
+  .pin-dot.pin-black{ background:radial-gradient(circle at 35% 30%, #2a2a2a, var(--black) 60%, #000); }
+
+  .sticker-waxseal{
+    width:38px; height:38px; border-radius:50%; background:radial-gradient(circle at 35% 30%, #8a3540, var(--garnet-deep) 70%);
+    display:flex; align-items:center; justify-content:center; box-shadow:0 5px 8px rgba(0,0,0,0.35);
+    transform:rotate(-8deg);
+  }
+  .sticker-waxseal svg{ width:60%; height:60%; }
+
+  .sticker-bow svg{ width:52px; height:auto; filter:drop-shadow(0 5px 6px rgba(0,0,0,0.3)); }
+  .sticker-binderclip svg{ width:26px; height:auto; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.3)); }
+  .sticker-newsclip{
+    width:150px; background:#FBF7F0; padding:10px 12px; box-shadow:0 8px 16px rgba(0,0,0,0.3); transform:rotate(3deg);
+    font-family:'Source Serif 4',serif; border-top:3px solid var(--black); border-bottom:3px solid var(--black);
+  }
+  .sticker-newsclip .nc-head{ font-family:'Anton',sans-serif; font-size:15px; color:var(--black); text-align:center; letter-spacing:0.5px; border-bottom:1px solid var(--black); padding-bottom:4px; margin-bottom:4px; }
+  .sticker-newsclip .nc-body{ font-size:9px; color:var(--gray); line-height:1.3; }
+  .sticker-favtag{
+    background:#FBF7F0; border-radius:16px; padding:6px 14px; font-family:'Kalam',cursive; font-weight:700; font-size:12px;
+    color:var(--garnet-deep); box-shadow:0 6px 12px rgba(0,0,0,0.28); transform:rotate(-3deg); position:relative;
+    width:fit-content; white-space:nowrap;
+  }
+
+  .sticker-flag-banner{
+    background:var(--garnet); color:#fff; font-family:'Baloo 2',cursive; font-weight:700; font-size:14px;
+    padding:9px 18px 9px 14px; transform:rotate(-2deg); box-shadow:0 6px 14px rgba(0,0,0,0.3);
+    clip-path:polygon(0 0,100% 0,92% 50%,100% 100%,0 100%);
+    width:fit-content; white-space:nowrap;
+  }
+  .sticker-mixtape{
+    width:110px; background:#1a1a1a; border-radius:6px; padding:8px; box-shadow:0 10px 20px rgba(0,0,0,0.4); transform:rotate(4deg);
+  }
+  .sticker-mixtape .mt-disc{ width:100%; aspect-ratio:1/1; border-radius:50%; background:radial-gradient(circle, #FBF7F0 0 8%, var(--garnet) 9% 60%, var(--garnet-deep) 61% 100%); display:flex; align-items:center; justify-content:center; }
+  .sticker-mixtape .mt-disc::after{ content:""; width:14%; height:14%; background:#1a1a1a; border-radius:50%; }
+  .sticker-mixtape .mt-label{ text-align:center; font-family:'Baloo 2',cursive; font-weight:700; font-size:9px; color:#FBF7F0; margin-top:6px; }
+
+  .sticker-comicstrip{ width:180px; background:#FBF7F0; border:2px solid var(--black); box-shadow:0 8px 18px rgba(0,0,0,0.32); transform:rotate(-2deg); }
+  .sticker-comicstrip svg{ width:100%; display:block; }
+
+  .sticker-text-banner{
+    background:#FBF7F0; border:2px solid var(--black); padding:6px 12px; font-family:'Baloo 2',cursive; font-weight:700;
+    font-size:11px; color:var(--garnet-deep); text-align:center; box-shadow:0 6px 12px rgba(0,0,0,0.28); transform:rotate(2deg);
+    width:fit-content; max-width:170px;
+  }
+  .sticker-photo-accent{ width:64px; transform:rotate(-8deg); filter:drop-shadow(0 5px 6px rgba(0,0,0,0.3)); }
+  .sticker-photo-accent svg{ width:100%; height:auto; }
+
+  .sticker-oval{
+    background:#FBF7F0; border:3px solid var(--garnet); border-radius:50%; width:96px; height:60px;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-family:'Baloo 2',cursive; font-weight:800; font-size:14px; color:var(--garnet-deep);
+    transform:rotate(-4deg); box-shadow:0 8px 14px rgba(0,0,0,0.3); line-height:1.1;
+  }
+  .sticker-circle-badge{
+    background:var(--black); border:3px solid #FBF7F0; border-radius:50%; width:78px; height:78px;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-family:'Baloo 2',cursive; font-weight:800; font-size:13px; color:#fff;
+    transform:rotate(5deg); box-shadow:0 8px 14px rgba(0,0,0,0.3); line-height:1.15;
+  }
+  .sticker-boom{ transform:rotate(-6deg); filter:drop-shadow(0 6px 8px rgba(0,0,0,0.4)); }
+  .sticker-boom svg{ width:130px; height:auto; }
+  .sticker-eyes{ display:flex; gap:4px; transform:rotate(3deg); }
+  .sticker-eyes svg{ width:26px; height:26px; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.3)); }
+  .sticker-gameday-note{
+    background:#FBF7F0; padding:16px 22px; box-shadow:0 8px 18px rgba(0,0,0,0.3); transform:rotate(-2deg);
+    clip-path:polygon(2% 0,98% 3%,100% 40%,97% 60%,100% 100%,3% 97%,0 55%,4% 30%);
+    font-family:'Baloo 2',cursive; font-weight:700; font-size:13px; color:var(--garnet-deep); text-align:center; width:190px;
+  }
+  .sticker-ribbon-banner{
+    background:var(--garnet); color:#fff; font-family:'Baloo 2',cursive; font-weight:700; font-size:12px;
+    padding:8px 16px; transform:rotate(-2deg); box-shadow:0 6px 12px rgba(0,0,0,0.3); text-align:center; width:170px;
+    clip-path:polygon(0 0,100% 0,100% 100%,50% 85%,0 100%);
+  }
+  .sticker-alum-badge{
+    background:radial-gradient(circle at 35% 30%, #8a3540, var(--garnet-deep) 60%, #2a0004);
+    border:2px solid #FBF7F0; border-radius:50%; width:84px; height:84px;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-family:'Baloo 2',cursive; font-weight:800; font-size:12px; color:#fff;
+    transform:rotate(-6deg); box-shadow:0 8px 14px rgba(0,0,0,0.35); line-height:1.2;
+  }
+  .sticker-plaid-tape{
+    position:absolute; width:56px; height:20px;
+    background:repeating-linear-gradient(0deg, #4a5a7a 0 3px, #6a7fa8 3px 6px), repeating-linear-gradient(90deg, rgba(255,255,255,0.5) 0 3px, transparent 3px 6px);
+    opacity:0.85; box-shadow:0 2px 4px rgba(0,0,0,0.2); z-index:2;
+  }
+
+  .sticker-coffee svg{ width:40px; height:40px; }
+  .sticker-tag{
+    background:var(--black); color:#fff; font-family:'Kalam',cursive; font-weight:700; font-size:12px;
+    padding:5px 12px; border-radius:3px; transform:rotate(-3deg); box-shadow:0 4px 8px rgba(0,0,0,0.3);
+    width:fit-content; white-space:nowrap;
+  }
+  .sticker-note-alt{ font-size:18px; transform:rotate(-3deg); }
+  .sticker-paw{ width:36px; height:36px; opacity:0.85; transform:rotate(12deg); }
+  .sticker-pencil svg{ width:60px; height:16px; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.3)); transform:rotate(-8deg); }
+
+  /* ---------- ADDITIONAL DIMENSIONAL EPHEMERA ---------- */
+  .sticker-pennant-big{ width:150px; transform:rotate(-4deg); }
+  .sticker-pennant-big svg{ width:100%; height:auto; }
+
+  .sticker-nametag{
+    background:#FBF7F0; border:2px dashed var(--garnet); border-radius:4px; padding:8px 14px;
+    transform:rotate(3deg); box-shadow:0 8px 14px rgba(0,0,0,0.3);
+    width:fit-content; white-space:nowrap;
+  }
+  .sticker-nametag .nt-hello{ font-family:'IBM Plex Mono',monospace; font-size:8.5px; letter-spacing:1.5px; color:var(--gray); }
+  .sticker-nametag .nt-name{ font-family:'Baloo 2',cursive; font-weight:700; font-size:17px; color:var(--garnet-deep); }
+
+  .sticker-envelope{ width:88px; transform:rotate(-5deg); position:relative; }
+  .sticker-envelope svg{ width:100%; height:auto; }
+
+  .charm-cluster{ display:flex; flex-direction:column; align-items:center; }
+  .charm-ring{ width:16px; height:16px; border:2.5px solid #4a4a4c; border-radius:50%; margin-bottom:-4px; }
+  .charm-item{ width:26px; height:26px; margin-top:2px; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.3)); }
+  .charm-item svg{ width:100%; height:100%; }
+
+  .sticker-todo{
+    width:128px; background:#FBF7F0; padding:10px 12px; box-shadow:0 8px 16px rgba(0,0,0,0.32); transform:rotate(-2deg);
+  }
+  .sticker-todo .td-head{ font-family:'Baloo 2',cursive; font-weight:700; font-size:11px; color:var(--garnet-deep); margin-bottom:5px; }
+  .sticker-todo .td-item{ font-family:'Kalam',cursive; font-size:11px; color:var(--black); display:flex; align-items:center; gap:5px; margin-bottom:3px; }
+  .sticker-todo .td-box{ width:9px; height:9px; border:1.5px solid var(--garnet); flex-shrink:0; }
+  .sticker-todo .td-box.checked{ background:var(--garnet); }
+
+  .sticker-heartbow{ width:36px; height:36px; filter:drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
+
+  .sticker-polaroid{
+    width:110px; background:#fff; padding:6px 6px 20px; box-shadow:0 10px 20px rgba(0,0,0,0.35);
+  }
+  .sticker-polaroid .p-photo{ width:100%; aspect-ratio:1/1; background:var(--black); display:flex; align-items:center; justify-content:center; }
+  .sticker-polaroid .p-photo svg{ width:50%; height:50%; }
+  .sticker-polaroid .p-cap{ text-align:center; font-family:'Caveat',cursive; font-weight:700; font-size:13px; color:var(--garnet-deep); margin-top:4px; }
+
+  .refresh-note{
+    text-align:center; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--garnet-deep);
+    background:rgba(255,255,255,0.55); border-radius:12px; padding:6px 14px; margin:14px auto 6px; width:fit-content;
+  }
+  .grid-nav{ display:flex; align-items:stretch; gap:10px; position:relative; z-index:2; }
+  .grid-nav .cork-grid{ flex:1; }
+  .grid-nav .grid{ flex:1; }
+  .page-arrow{
+    flex-shrink:0; width:38px; border:none; border-radius:50%; background:var(--black); color:#fff;
+    font-size:20px; cursor:pointer; align-self:center; height:38px; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 10px rgba(0,0,0,0.3); transition:transform .15s ease, background .15s ease;
+  }
+  .page-arrow:hover{ transform:scale(1.1); background:var(--garnet); }
+  .page-arrow:disabled{ opacity:0.3; cursor:default; transform:none; background:var(--black); }
+  .page-dots{ display:flex; justify-content:center; gap:6px; margin-top:14px; }
+  .page-dots span{ width:7px; height:7px; border-radius:50%; background:rgba(11,11,12,0.25); }
+  .page-dots span.active{ background:var(--garnet); }
+  .comment-add{ display:flex; gap:6px; margin-top:8px; }
+  .comment-add input{ flex:1; font-size:11.5px; border:1px solid var(--line); padding:5px 8px; font-family:'Inter',sans-serif; }
+  .comment-add button{ background:var(--black); color:var(--white); border:none; padding:5px 10px; font-size:11px; cursor:pointer; }
+
+  /* ---------- CARD GRID (study/dining) ---------- */
+  .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); }
+  @media (max-width:760px){ .grid{ grid-template-columns:repeat(2,1fr); } }
+  .card{ background:var(--cream-card); transition:transform .18s ease, box-shadow .18s ease; }
+  .card:hover{ transform:translateY(-4px); box-shadow:0 14px 28px -14px rgba(0,0,0,0.25); }
+  .card-top{ height:64px; background:linear-gradient(135deg, var(--garnet), var(--garnet-deep)); position:relative; }
+  .save-btn-icon{
+    position:absolute; top:8px; left:10px; background:rgba(255,255,255,0.15); border:none; color:#fff;
+    font-size:17px; cursor:pointer; width:26px; height:26px; border-radius:50%; line-height:1;
+    display:flex; align-items:center; justify-content:center; transition:transform .15s ease, background .15s ease;
+  }
+  .save-btn-icon:hover{ transform:scale(1.15); background:rgba(255,255,255,0.28); }
+  .save-btn-icon.saved{ color:#FBF7F0; background:rgba(0,0,0,0.25); }
+  .busy-row{ display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .busy-bar{ flex:1; height:4px; background:var(--line); border-radius:2px; overflow:hidden; }
+  .busy-fill{ height:100%; border-radius:2px; }
+  .busy-fill.busy-quiet{ background:var(--gray); }
+  .busy-fill.busy-moderate{ background:var(--black); }
+  .busy-fill.busy-busy{ background:var(--garnet); }
+  .busy-label{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--gray); white-space:nowrap; }
+  .card-top .ref{ position:absolute; top:8px; right:10px; font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:rgba(255,255,255,0.65); }
+  .card-body{ padding:16px; }
+  .card-body h3{ font-size:16px; margin-bottom:5px; }
+  .card-body p{ font-size:13px; color:var(--gray); margin-bottom:10px; }
+  .stars{ color:var(--garnet); font-size:13px; letter-spacing:1px; }
+  .card-hint{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--gray); margin-top:8px; display:flex; justify-content:space-between; }
+  .area-group{ margin-bottom:32px; }
+  .area-group:last-child{ margin-bottom:0; }
+  .area-label{ font-size:12px; letter-spacing:0.08em; color:var(--garnet); margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .card{ cursor:pointer; }
+
+  /* ---------- PROFILE ---------- */
+  .profile-edit{ display:grid; grid-template-columns:200px 1fr; gap:28px; max-width:640px; }
+  @media (max-width:600px){ .profile-edit{ grid-template-columns:1fr; } }
+  .avatar-col{ display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .avatar-big{ width:120px; height:120px; border-radius:50%; background:var(--black); color:var(--white); display:flex; align-items:center; justify-content:center; font-family:'Source Serif 4',serif; font-weight:700; font-size:34px; overflow:hidden; }
+  .avatar-big img{ width:100%; height:100%; object-fit:cover; }
+  .upload-btn{ font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--gray); border:1px solid var(--line); padding:7px 14px; cursor:pointer; background:var(--white); }
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:0.05em; color:var(--gray); margin-bottom:5px; }
+  .field input, .field textarea{ width:100%; border:1px solid var(--line); padding:9px 12px; font-family:'Inter',sans-serif; font-size:13.5px; outline:none; }
+  .field input:focus, .field textarea:focus{ border-color:var(--garnet); }
+  .field textarea{ resize:vertical; min-height:70px; }
+  .field input:focus, .field textarea:focus{ border-color:var(--garnet); }
+  .save-btn{ background:var(--garnet); color:var(--white); border:none; padding:10px 20px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .save-btn, .friend-btn, .accept-btn, .decline-btn{ transition:transform .15s ease, box-shadow .15s ease; }
+  .save-btn:hover, .friend-btn:hover:not(.added):not(.pending), .accept-btn:hover, .decline-btn:hover{ transform:translateY(-2px); box-shadow:0 8px 16px -6px rgba(0,0,0,0.3); }
+  .save-btn:hover{ background:var(--garnet-deep); }
+  .save-note{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--gray); margin-top:10px; display:none; }
+  .save-note.show{ display:block; color:#0B0B0C; }
+  .stat-row{ display:flex; gap:1px; background:var(--line); border:1px solid var(--line); margin-top:24px; max-width:420px; }
+  .stat{ flex:1; background:var(--cream-card); text-align:center; padding:14px 8px; }
+  .stat .num{ font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:20px; color:var(--garnet); }
+  .stat .label{ font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--gray); margin-top:3px; }
+  .badge-row{ display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; max-width:420px; }
+  .badge-note{ font-size:11.5px; color:var(--gray); margin-top:10px; max-width:420px; font-family:'IBM Plex Mono',monospace; }
+  .badge{ font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; padding:6px 12px; border-radius:14px; background:var(--paper); border:1px solid var(--line); color:var(--black); }
+  .badge:hover{ transform:translateY(-2px); }
+  .backend-note{ font-size:12.5px; color:var(--gray); margin-top:24px; border-top:1px dashed var(--line); padding-top:14px; max-width:420px; }
+
+  /* ---------- MODALS (spot detail + report) ---------- */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; z-index:250; background:rgba(11,11,12,0.55);
+    align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-box{ background:var(--cream-card); border-radius:12px; max-width:640px; width:100%; padding:26px; box-shadow:0 30px 70px rgba(0,0,0,0.35); }
+  .spot-modal-head{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
+  .modal-close{ background:none; border:1px solid var(--line); border-radius:50%; width:30px; height:30px; cursor:pointer; font-size:13px; color:var(--gray); flex-shrink:0; }
+  .modal-close:hover{ border-color:var(--garnet); color:var(--garnet); }
+
+  .gallery-row{ display:flex; gap:10px; overflow-x:auto; margin-bottom:12px; }
+  .gallery-thumb{ width:120px; height:90px; border-radius:8px; flex-shrink:0; display:flex; align-items:flex-end; padding:8px; overflow:hidden; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; }
+  .gallery-thumb:hover{ transform:scale(1.04); box-shadow:0 8px 16px rgba(0,0,0,0.25); }
+  .rate-row{ display:flex; align-items:center; gap:2px; margin-top:8px; }
+  .rate-star{ font-size:16px; color:var(--line); cursor:pointer; transition:color .1s ease, transform .1s ease; }
+  .rate-star:hover, .rate-star.active{ color:var(--garnet); }
+  .rate-star:hover{ transform:scale(1.15); }
+  .rate-label{ font-size:10.5px; color:var(--gray); margin-left:8px; }
+  .gallery-label{ color:rgba(255,255,255,0.85); font-size:10px; }
+  .upload-row{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+  .mod-note{ font-size:10.5px; color:var(--garnet); }
+
+  .hours-block{ margin-bottom:18px; }
+  .menu-block{ margin-bottom:18px; }
+  .menu-list{ border:1px solid var(--line); }
+  .menu-item{ display:flex; justify-content:space-between; padding:9px 12px; font-size:13px; border-bottom:1px solid var(--line); }
+  .menu-item:last-child{ border-bottom:none; }
+  .menu-price{ color:var(--garnet); font-weight:600; font-size:12px; }
+  .video-placeholder{ background:var(--black); border-radius:10px; height:130px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; margin-bottom:20px; }
+  .video-play{ width:40px; height:40px; border-radius:50%; border:2px solid var(--garnet); color:var(--garnet); display:flex; align-items:center; justify-content:center; font-size:14px; }
+
+  .spot-comments .comment{ position:relative; padding-right:56px; }
+  .report-link{ position:absolute; top:0; right:0; background:none; border:none; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--gray); text-decoration:underline; cursor:pointer; }
+  .report-link:hover{ color:var(--garnet); }
+  .comment-photo{ margin-top:6px; }
+  .comment-photo img{ max-width:160px; border-radius:6px; border:1px solid var(--line); }
+  .person-card .report-link{ position:static; display:block; margin-top:8px; text-align:center; }
+
+  /* ---------- INTRO SPLASH ---------- */
+  #intro{
+    position:fixed; inset:0; z-index:300; background:var(--black); color:var(--white);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    transition:opacity .6s ease, visibility .6s ease; cursor:pointer;
+  }
+  #intro.hide{ opacity:0; visibility:hidden; pointer-events:none; }
+  #intro .boot-log{ font-family:'IBM Plex Mono',monospace; font-size:13px; color:#8a8a8c; width:min(420px,84vw); margin-bottom:28px; min-height:90px; }
+  #intro .boot-log div{ margin-bottom:6px; opacity:0; animation:lineIn .3s ease forwards; }
+  #intro .boot-log .ok{ color:#C9A9AB; }
+  #intro .brand-reveal{ text-align:center; opacity:0; transform:translateY(8px); transition:opacity .5s ease, transform .5s ease; }
+  #intro .brand-reveal.show{ opacity:1; transform:translateY(0); }
+  #intro .brand-reveal h1{ font-family:'Source Serif 4', serif; font-size:48px; font-weight:700; }
+  #intro .brand-reveal .tagline{ font-family:'IBM Plex Mono',monospace; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#8F0410; margin-top:10px; }
+  #intro .brand-reveal .rule{ width:60px; height:2px; background:var(--garnet); margin:16px auto 0; }
+  #intro .skip{ position:absolute; bottom:26px; right:30px; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#5a5a5c; }
+  @keyframes lineIn{ from{ opacity:0; transform:translateY(3px); } to{ opacity:1; transform:translateY(0); } }
+  body.intro-active{ overflow:hidden; }
+
+  /* ---------- HEADER: brand row + notifications ---------- */
+  .brand-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; gap:16px; }
+  .global-search-wrap{ position:relative; flex:1; max-width:340px; }
+  .global-search-input{
+    width:100%; padding:9px 14px; border:1px solid var(--line); border-radius:16px; font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px; outline:none; background:var(--paper);
+  }
+  .global-search-input:focus{ border-color:var(--garnet); background:var(--white); }
+  .global-search-results{
+    position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--white); border:1px solid var(--line);
+    box-shadow:0 12px 24px rgba(0,0,0,0.15); z-index:200; display:none; max-height:340px; overflow-y:auto;
+  }
+  .global-search-results.show{ display:block; }
+  .gs-group-label{ font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.06em; color:var(--garnet); padding:8px 12px 4px; background:var(--paper); }
+  .gs-result-item{ padding:9px 12px; cursor:pointer; font-size:12.5px; border-bottom:1px solid var(--line); }
+  .gs-result-item:hover{ background:var(--paper); }
+  .gs-result-item .gs-sub{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--gray); }
+  .gs-empty{ padding:14px; font-size:12px; color:var(--gray); font-family:'IBM Plex Mono',monospace; text-align:center; }
+  .notif-wrap{ position:relative; }
+  .dark-mode-toggle{ background:none; border:1px solid var(--line); width:38px; height:38px; border-radius:50%; cursor:pointer; font-size:15px; flex-shrink:0; }
+  .dark-mode-toggle:hover{ border-color:var(--garnet); }
+  .notif-bell{ background:none; border:1px solid var(--line); width:38px; height:38px; border-radius:50%; cursor:pointer; font-size:15px; position:relative; }
+  .notif-dot{ position:absolute; top:6px; right:7px; width:8px; height:8px; border-radius:50%; background:var(--garnet); border:1.5px solid var(--white); }
+  .notif-dropdown{ display:none; position:absolute; right:0; top:46px; width:280px; background:var(--white); border:1px solid var(--line); box-shadow:0 16px 32px rgba(0,0,0,0.15); z-index:20; }
+  .notif-dropdown.show{ display:block; }
+  .notif-item{ padding:12px 14px; font-size:12.5px; color:var(--gray); border-bottom:1px solid var(--line); }
+  .notif-item:last-child{ border-bottom:none; }
+  .notif-item strong{ color:var(--black); }
+
+  /* ---------- REACTIONS ---------- */
+  .reaction-row{ display:flex; align-items:center; gap:14px; }
+  .react-btn{ background:none; border:1px solid var(--line); border-radius:16px; padding:5px 12px; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; color:var(--gray); display:flex; align-items:center; gap:5px; }
+  .react-btn.active{ color:var(--garnet); border-color:var(--garnet); background:rgba(115,0,10,0.06); }
+  .react-summary{ font-size:11px; color:var(--gray); font-family:'IBM Plex Mono',monospace; }
+  .share-btn{ background:none; border:1px solid var(--line); border-radius:16px; padding:5px 12px; cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; color:var(--gray); }
+  .share-btn.shared{ color:#0B0B0C; border-color:#0B0B0C; }
+
+  /* ---------- PEOPLE ---------- */
+  .people-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media (max-width:760px){ .people-grid{ grid-template-columns:repeat(2,1fr); } }
+  .person-card{ border:1px solid var(--line); padding:18px; text-align:center; }
+  .person-avatar{ width:56px; height:56px; border-radius:50%; background:var(--black); color:var(--white); display:flex; align-items:center; justify-content:center; font-family:'Source Serif 4',serif; font-weight:700; font-size:18px; margin:0 auto 10px; }
+  .person-card h3{ font-size:15px; margin-bottom:2px; }
+  .person-meta{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--gray); margin-bottom:12px; }
+  .friend-btn{ width:100%; background:var(--garnet); color:var(--white); border:none; padding:8px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; cursor:pointer; }
+  .friend-btn.added{ background:var(--paper); color:var(--gray); border:1px solid var(--line); }
+  .friend-btn.pending{ background:var(--white); color:var(--garnet); border:1px solid var(--garnet); cursor:default; }
+
+  .requests-panel{ margin-bottom:24px; }
+  .requests-panel:empty{ display:none; }
+  .request-row{ display:flex; align-items:center; justify-content:space-between; border:1px solid var(--line); padding:12px 16px; margin-bottom:8px; background:var(--paper); }
+  .request-left{ display:flex; align-items:center; gap:12px; }
+  .request-avatar{ width:38px; height:38px; border-radius:50%; background:var(--black); color:var(--white); display:flex; align-items:center; justify-content:center; font-family:'Source Serif 4',serif; font-weight:700; font-size:13px; flex-shrink:0; }
+  .request-name{ font-size:13.5px; font-weight:600; }
+  .request-meta{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--gray); }
+  .request-actions{ display:flex; gap:8px; }
+  .accept-btn{ background:var(--garnet); color:var(--white); border:none; padding:7px 14px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; cursor:pointer; }
+  .decline-btn{ background:var(--white); color:var(--gray); border:1px solid var(--line); padding:7px 14px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; cursor:pointer; }
+  .requests-head{ font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:1px; color:var(--garnet); margin-bottom:10px; }
+
+  /* ---------- GROUPS ---------- */
+  .groups-layout{ display:grid; grid-template-columns:230px 1fr; gap:1px; background:var(--line); border:1px solid var(--line); height:480px; }
+  @media (max-width:700px){ .groups-layout{ grid-template-columns:1fr; height:auto; } }
+  .group-list{ background:var(--paper); overflow-y:auto; }
+  .group-item{ padding:14px 16px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .group-item:hover{ background:rgba(115,0,10,0.05); }
+  .group-item.active{ background:var(--black); }
+  .group-item.active .group-name{ color:var(--white); }
+  .group-item.active .group-meta{ color:#B8ACA6; }
+  .group-name{ font-weight:600; font-size:13.5px; margin-bottom:2px; }
+  .group-meta{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--gray); }
+  .group-chat{ background:var(--cream-card); display:flex; flex-direction:column; }
+  .chat-header{ padding:14px 18px; border-bottom:1px solid var(--line); font-weight:600; font-family:'Source Serif 4',serif; font-size:15px; }
+  .chat-messages{ flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:12px; }
+  .chat-msg{ max-width:75%; }
+  .chat-msg.me{ align-self:flex-end; text-align:right; }
+  .chat-bubble{ display:inline-block; padding:9px 13px; border-radius:14px; font-size:13px; background:var(--paper); }
+  .chat-msg.me .chat-bubble{ background:var(--garnet); color:var(--white); }
+  .chat-sender{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--gray); margin-bottom:3px; }
+  .chat-input-row{ display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+  .chat-input-row input{ flex:1; border:1px solid var(--line); padding:9px 12px; font-size:13px; outline:none; }
+  .chat-input-row input:focus{ border-color:var(--garnet); }
+  .chat-input-row button{ background:var(--garnet); color:var(--white); border:none; padding:9px 16px; font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; cursor:pointer; }
+  .online-dot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:#0B0B0C; margin-left:5px; vertical-align:middle; }
+  .group-chat, .about-avatar{ position:relative; }
+  .group-chat::before{ content:""; position:absolute; top:-1px; left:-1px; width:12px; height:12px; border-top:2px solid var(--garnet); border-left:2px solid var(--garnet); }
+  .group-chat::after{ content:""; position:absolute; bottom:-1px; right:-1px; width:12px; height:12px; border-bottom:2px solid var(--garnet); border-right:2px solid var(--garnet); }
+  .corner-bracket{ position:relative; }
+  .corner-bracket::before{ content:""; position:absolute; top:-1px; left:-1px; width:12px; height:12px; border-top:2px solid var(--garnet); border-left:2px solid var(--garnet); z-index:5; }
+  .corner-bracket::after{ content:""; position:absolute; bottom:-1px; right:-1px; width:12px; height:12px; border-bottom:2px solid var(--garnet); border-right:2px solid var(--garnet); z-index:5; }
+  .live-dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--garnet); margin-right:6px; animation:livePulse 1.8s ease-in-out infinite; }
+  @keyframes livePulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(115,0,10,0.5); } 50%{ box-shadow:0 0 0 5px rgba(115,0,10,0); } }
+  .progress-bar{ position:fixed; top:0; left:0; height:2.5px; background:var(--garnet); width:0%; z-index:300; transition:width .1s linear; }
+
+  /* ---------- GUIDELINES ---------- */
+  .rules-block{ margin-bottom:28px; }
+  .rule-item{ display:flex; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); }
+  .rule-num{ color:var(--garnet); font-size:13px; flex-shrink:0; padding-top:2px; }
+  .rule-item h3{ font-size:15.5px; margin-bottom:4px; }
+  .rule-item p{ font-size:13px; color:var(--gray); }
+  .strike-system{ border:1px solid var(--line); background:var(--paper); padding:20px; margin-bottom:24px; }
+  .strike-row{ display:flex; align-items:center; gap:14px; padding:9px 0; font-size:13.5px; }
+  .strike-badge{ font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:700; background:var(--cream-card); border:1px solid var(--garnet); color:var(--garnet); padding:4px 12px; min-width:44px; text-align:center; border-radius:12px; }
+  .strike-badge.ban{ background:var(--garnet); color:var(--white); }
+  .strike-badge.ban-perm{ background:var(--black); color:var(--white); border-color:var(--black); }
+  .appeal-box{ border:1px solid var(--garnet); padding:20px; margin-bottom:28px; }
+  .appeal-box h3{ font-size:16px; margin-bottom:8px; }
+  .appeal-box p{ font-size:13.5px; color:var(--gray); margin-bottom:14px; max-width:56ch; }
+  .strike-demo{ border-top:1px dashed var(--line); padding-top:20px; }
+  .flag-result-box{ border:1px solid var(--line); padding:14px; font-size:13px; }
+  .flag-result-box.flagged{ border-color:var(--garnet); background:rgba(115,0,10,0.05); color:var(--garnet-deep); }
+  .flag-result-box.clean{ border-color:#0B0B0C; background:rgba(61,90,74,0.06); color:#4A0007; }
+
+  /* ---------- ABOUT ---------- */
+  .about-layout{ display:grid; grid-template-columns:140px 1fr; gap:28px; align-items:start; max-width:700px; }
+  @media (max-width:600px){ .about-layout{ grid-template-columns:1fr; } }
+  .about-avatar{ width:120px; height:120px; border-radius:50%; background:var(--black); color:var(--white); display:flex; align-items:center; justify-content:center; font-family:'Source Serif 4',serif; font-weight:700; font-size:34px; }
+  .about-links{ display:flex; gap:10px; flex-wrap:wrap; }
+  .about-links a{ font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:500; padding:9px 14px; border:1px solid var(--line); color:var(--gray); text-decoration:none; }
+  .about-links a:hover{ border-color:var(--garnet); color:var(--garnet); }
+
+  .about-hero{ display:grid; grid-template-columns:170px 1fr; gap:32px; align-items:center; max-width:720px; margin-bottom:36px; }
+  @media (max-width:600px){ .about-hero{ grid-template-columns:1fr; } }
+  .about-hero-photo{ width:170px; height:170px; border-radius:8px; overflow:hidden; box-shadow:0 16px 32px rgba(11,11,12,0.18); }
+  .about-hero-photo img{ width:100%; height:100%; object-fit:cover; }
+
+  .about-stats-strip{ display:flex; gap:1px; background:var(--line); border:1px solid var(--line); max-width:720px; margin-bottom:36px; }
+  .about-stat{ flex:1; background:var(--white); text-align:center; padding:16px 10px; }
+  .about-stat .num{ font-family:'Source Serif 4',serif; font-weight:700; font-size:18px; color:var(--garnet); }
+  .about-stat .label{ font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--gray); letter-spacing:0.04em; margin-top:4px; }
+
+  .about-section{ max-width:720px; margin-bottom:36px; }
+
+  .timeline{ position:relative; padding-left:24px; }
+  .timeline::before{ content:""; position:absolute; left:4px; top:6px; bottom:6px; width:1px; background:var(--line); }
+  .timeline-item{ position:relative; padding-bottom:22px; display:flex; gap:12px; align-items:flex-start; }
+  .timeline-item:last-child{ padding-bottom:0; }
+  .timeline-dot{ position:absolute; left:-24px; top:3px; width:9px; height:9px; border-radius:50%; background:var(--gray); border:2px solid var(--white); }
+  .timeline-item.active .timeline-dot{ background:var(--garnet); box-shadow:0 0 0 3px rgba(115,0,10,0.15); }
+  .timeline-item.upcoming .timeline-dot{ background:var(--white); border:2px solid var(--line); }
+  .timeline-item.upcoming{ opacity:0.6; }
+  .timeline-item strong{ display:block; font-size:14px; margin-bottom:2px; }
+  .timeline-date{ display:block; font-size:12.5px; color:var(--gray); }
+
+  .roadmap-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:var(--line); border:1px solid var(--line); }
+  @media (max-width:600px){ .roadmap-grid{ grid-template-columns:1fr; } }
+  .roadmap-item{ background:var(--white); padding:14px 16px; font-size:13.5px; color:var(--black); display:flex; align-items:center; gap:10px; }
+  .roadmap-item .mono{ color:var(--garnet); font-weight:700; font-size:12px; }
+
+  /* ---------- WATERMARK MOTIF (echoes portfolio) ---------- */
+  .watermark{ position:absolute; width:170px; height:170px; border-radius:50%; border:1px solid rgba(115,0,10,0.25); display:flex; align-items:center; justify-content:center; pointer-events:none; }
+  .watermark span{ font-family:'Source Serif 4',serif; font-size:44px; color:rgba(115,0,10,0.18); }
+  .page-head{ position:relative; }
+
+  /* ---------- PROFILE WALL ---------- */
+  .wall{ margin-top:32px; }
+  .wall-head{ font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:1px; color:var(--garnet); margin-bottom:12px; }
+  .activity-header{ font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.04em; color:var(--gray); border-top:1px dashed var(--line); padding-top:20px; margin-top:8px; margin-bottom:16px; max-width:600px; }
+  .wall-empty{ font-size:13px; color:var(--gray); border:1px dashed var(--line); padding:20px; text-align:center; }
+
+  .events-list{ display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); }
+  .event-card{ background:var(--white); padding:20px; display:flex; gap:18px; align-items:flex-start; }
+  @media (max-width:600px){ .event-card{ flex-direction:column; } }
+  .event-date-block{ background:var(--black); color:var(--white); text-align:center; padding:10px 14px; flex-shrink:0; min-width:64px; }
+  .event-date-block .month{ font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.05em; color:#C9A9AB; }
+  .event-date-block .day{ font-family:'Source Serif 4',serif; font-weight:700; font-size:24px; line-height:1.1; }
+  .event-body{ flex:1; }
+  .event-tag{ font-family:'IBM Plex Mono',monospace; font-size:9.5px; font-weight:700; letter-spacing:0.04em; padding:3px 9px; border-radius:12px; display:inline-block; margin-bottom:6px; }
+  .event-title{ font-size:16.5px; font-weight:600; font-family:'Source Serif 4',serif; margin-bottom:4px; }
+  .event-meta{ font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--gray); margin-bottom:8px; }
+  .event-desc{ font-size:13.5px; color:var(--gray); margin-bottom:12px; max-width:56ch; }
+  .event-creator{ display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12px; color:var(--gray); }
+  .event-creator strong{ color:var(--black); }
+  .event-creator-avatar{
+    width:24px; height:24px; border-radius:50%; background:var(--black); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace;
+    font-size:9px; font-weight:700; overflow:hidden; flex-shrink:0;
+  }
+  .event-creator-avatar img{ width:100%; height:100%; object-fit:cover; }
+  .event-footer{ display:flex; align-items:center; gap:14px; }
+  .rsvp-btn{ background:var(--garnet); color:#fff; border:none; padding:8px 16px; font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; cursor:pointer; border-radius:2px; transition:background .15s ease, transform .15s ease; }
+  .rsvp-btn:hover{ background:var(--garnet-deep); transform:translateY(-1px); }
+  .rsvp-btn.going{ background:var(--black); }
+  .rsvp-btn.going:hover{ background:#2a2a2a; }
+  .event-count{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--gray); }
+
+</style>
+</head>
+<body class="intro-active">
+
+<div id="intro">
+  <div class="boot-log mono" id="bootLog"></div>
+  <div class="brand-reveal" id="brandReveal">
+    <h1>CampusConnect</h1>
+    <div class="tagline">Get Connected.</div>
+    <div class="rule"></div>
+  </div>
+  <div class="skip mono">tap to continue</div>
+</div>
+
+<div class="progress-bar" id="progressBar"></div>
+
+<div class="side-rail left">
+  <span>§ CAMPUSCONNECT</span>
+  <div class="dot"></div>
+  <span>UOFSC · EST. 2026</span>
+  <div class="dot"></div>
+  <span>§ CAMPUSCONNECT</span>
+</div>
+<div class="side-rail right">
+  <span>GO COCKS</span>
+  <div class="dot"></div>
+  <span>COLUMBIA, SC</span>
+  <div class="dot"></div>
+  <span>GO COCKS</span>
+</div>
+
+<div class="app">
+  <div class="letterhead">
+    <span>UNIVERSITY OF SOUTH CAROLINA · COLUMBIA, SC</span>
+    <span>§ CAMPUSCONNECT</span>
+  </div>
+
+  <header>
+    <div class="brand-row">
+      <div class="brand"><span class="mark"></span> CampusConnect</div>
+      <div class="global-search-wrap">
+        <input type="text" id="globalSearchInput" class="global-search-input" placeholder="Search everything..." aria-label="Search posts, people, groups, and events" oninput="runGlobalSearch(this.value)">
+        <div id="globalSearchResults" class="global-search-results"></div>
+      </div>
+      <button class="dark-mode-toggle" onclick="toggleDarkMode()" aria-label="Toggle dark mode" id="darkModeBtn">🌙</button>
+      <div class="notif-wrap">
+        <button class="notif-bell" onclick="toggleNotifs()" aria-label="Notifications">🔔<span class="notif-dot"></span></button>
+        <div class="notif-dropdown" id="notifDropdown">
+          <div class="notif-item"><strong>@carolina_eats</strong> liked your post "Parking near the Horseshoe"</div>
+          <div class="notif-item"><strong>@night_owl</strong> commented on "Hidden gem in Cooper"</div>
+          <div class="notif-item"><strong>@sophomore_sam</strong> sent you a friend request</div>
+        </div>
+      </div>
+    </div>
+    <nav>
+      <button class="tab-btn active" data-page="map">Map</button>
+      <button class="tab-btn" data-page="feed">Feed</button>
+      <button class="tab-btn" data-page="people">People</button>
+      <button class="tab-btn" data-page="groups">Groups</button>
+      <button class="tab-btn" data-page="messages">Messages</button>
+      <button class="tab-btn" data-page="events">Events</button>
+      <button class="tab-btn" data-page="study">Study Spots</button>
+      <button class="tab-btn" data-page="dining">Dining</button>
+      <button class="tab-btn" data-page="guidelines">Guidelines</button>
+      <button class="tab-btn" data-page="about">About</button>
+      <button class="tab-btn" data-page="profile">Profile</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- MAP -->
+    <section class="page active" id="page-map">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>CC</span></div><h2>Where you at?</h2><p>Drag to explore campus. Tap a building for details and the walking route from your dorm.</p></div>
+      <div class="map-toggle" style="display:flex; gap:8px; margin-bottom:14px;">
+        <button class="map-toggle-btn active" id="btnIllustrated" onclick="setMapView('illustrated')">Illustrated map</button>
+        <button class="map-toggle-btn" id="btnSatellite" onclick="setMapView('satellite')">Satellite view</button>
+      </div>
+      <div class="map-search-wrap">
+        <input type="text" id="mapSearchInput" class="map-search-input" placeholder="Search buildings — try &quot;library&quot; or &quot;dorm&quot;..." aria-label="Search buildings on campus map" oninput="filterMapBuildings(this.value)" onkeydown="if(event.key==='Enter') jumpToFirstMatch(this.value)">
+        <div id="mapSearchResults" class="map-search-results"></div>
+      </div>
+      <button class="save-btn" style="margin-bottom:14px;" onclick="openReportIssueModal()">⚠ Report an issue</button>
+      <div id="illustratedMap">
+      <div class="map-wrap corner-bracket">
+        <div class="map-bar">
+          <div class="map-bar-left">
+            <span class="dot" style="background:#73000A"></span><span class="dot" style="background:#8a7a4a"></span><span class="dot" style="background:#4a6a4a"></span>
+            <span class="mono" style="font-size:11px;color:#8a8a8c;margin-left:8px;"><span class="live-dot"></span>campus_map.live</span>
+          </div>
+          <span class="map-hint">click + drag to pan</span>
+        </div>
+        <div class="map-viewport" id="mapViewport">
+          <div class="map-canvas" id="mapCanvas" style="width:1700px; height:1100px;">
+            <svg viewBox="0 0 1700 1100" preserveAspectRatio="none">
+              <!-- roads -->
+              <path d="M40 850 L1660 850" stroke="#2a2a2a" stroke-width="4" fill="none"/>
+              <path d="M300 40 L300 1060" stroke="#2a2a2a" stroke-width="4" fill="none"/>
+              <path d="M1150 40 L1150 1060" stroke="#2a2a2a" stroke-width="4" fill="none"/>
+              <path d="M40 480 L1660 480" stroke="#2a2a2a" stroke-width="2.5" fill="none" opacity="0.6"/>
+              <!-- Horseshoe green (historic quad) -->
+              <ellipse cx="720" cy="330" rx="230" ry="150" fill="#0B0B0C" stroke="#0B0B0C" stroke-width="2"/>
+              <text x="720" y="335" font-family="Georgia,serif" font-size="15" fill="#C9A9AB" text-anchor="middle">THE HORSESHOE</text>
+            </svg>
+
+            <!-- Horseshoe ring buildings (real, historic) -->
+            <div class="building" data-key="desaussure" style="left:520px; top:220px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('desaussure')"></div><div class="pin-label">DeSaussure College</div></div>
+            <div class="building" data-key="rutledge" style="left:520px; top:320px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('rutledge')"></div><div class="pin-label">Rutledge College</div></div>
+            <div class="building" data-key="elliott" style="left:540px; top:420px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('elliott')"></div><div class="pin-label">Elliott College</div></div>
+            <div class="building" data-key="pinckney" style="left:900px; top:220px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('pinckney')"></div><div class="pin-label">Pinckney College</div></div>
+            <div class="building" data-key="harper" style="left:900px; top:320px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('harper')"></div><div class="pin-label">Harper College</div></div>
+            <div class="building" data-key="legare" style="left:880px; top:420px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('legare')"></div><div class="pin-label">Legare College</div></div>
+            <div class="building" data-key="mckissick" style="left:720px; top:470px;"><div class="dot-mark" style="background:var(--plum);" onclick="selectBuilding('mckissick')"></div><div class="pin-label">McKissick Museum</div></div>
+            <div class="building" data-key="longstreet" style="left:640px; top:190px;"><div class="dot-mark" style="background:var(--plum);" onclick="selectBuilding('longstreet')"></div><div class="pin-label">Longstreet Theatre</div></div>
+
+            <!-- Surrounding campus -->
+            <div class="building" data-key="cooper" style="left:720px; top:600px;"><div class="dot-mark" style="background:var(--indigo);" onclick="selectBuilding('cooper')"></div><div class="pin-label">Thomas Cooper Library</div></div>
+            <div class="building" data-key="russell" style="left:520px; top:640px;"><div class="dot-mark" style="background:var(--amber);" onclick="selectBuilding('russell')"></div><div class="pin-label">Russell House</div></div>
+            <div class="building" data-key="closehipp" style="left:1000px; top:560px;"><div class="dot-mark" style="background:var(--forest);" onclick="selectBuilding('closehipp')"></div><div class="pin-label">Close-Hipp</div></div>
+            <div class="building" data-key="moore" style="left:1220px; top:480px;"><div class="dot-mark" style="background:var(--amber);" onclick="selectBuilding('moore')"></div><div class="pin-label">Darla Moore School of Business</div></div>
+            <div class="building" data-key="swearingen" style="left:1250px; top:640px;"><div class="dot-mark" style="background:var(--teal);" onclick="selectBuilding('swearingen')"></div><div class="pin-label">Swearingen Engineering Center</div></div>
+            <div class="building" data-key="preston" style="left:400px; top:760px;"><div class="dot-mark" style="background:var(--forest);" onclick="selectBuilding('preston')"></div><div class="pin-label">Preston College</div></div>
+            <div class="building" data-key="wadehampton" style="left:280px; top:840px;"><div class="dot-mark" style="background:var(--forest);" onclick="selectBuilding('wadehampton')"></div><div class="pin-label">Wade Hampton</div></div>
+            <div class="building" data-key="thomson" style="left:600px; top:800px;"><div class="dot-mark" style="background:var(--teal);" onclick="selectBuilding('thomson')"></div><div class="pin-label">Thomson Student Health Center</div></div>
+            <div class="building" data-key="strom" style="left:900px; top:790px;"><div class="dot-mark" style="background:var(--teal);" onclick="selectBuilding('strom')"></div><div class="pin-label">Strom Thurmond Wellness Center</div></div>
+            <div class="building" data-key="koger" style="left:1400px; top:400px;"><div class="dot-mark" style="background:var(--plum);" onclick="selectBuilding('koger')"></div><div class="pin-label">Koger Center for the Arts</div></div>
+            <div class="building" data-key="colonial" style="left:1420px; top:800px;"><div class="dot-mark" style="background:var(--garnet);" onclick="selectBuilding('colonial')"></div><div class="pin-label">Colonial Life Arena</div></div>
+            <div class="building" data-key="williamsbrice" style="left:250px; top:1000px;"><div class="dot-mark" style="background:var(--garnet);" onclick="selectBuilding('williamsbrice')"></div><div class="pin-label">Williams-Brice Stadium</div></div>
+
+            <div class="building you" style="left:400px; top:900px;"><div class="dot-mark"></div><div class="pin-label">You (Greene St.)</div></div>
+          </div>
+          <div class="zoom-controls">
+            <button onclick="nudgeMap(0,-80)">↑</button>
+            <button onclick="nudgeMap(-80,0)">←</button>
+            <button onclick="nudgeMap(80,0)">→</button>
+            <button onclick="nudgeMap(0,80)">↓</button>
+          </div>
+        </div>
+      </div>
+      <div class="map-info" id="mapInfo"></div>
+      </div>
+
+      <div id="satelliteMap" style="display:none;">
+        <div class="satellite-wrap">
+          <iframe
+            src="https://maps.google.com/maps?q=University+of+South+Carolina,+Columbia,+SC&t=k&z=16&ie=UTF8&iwloc=&output=embed"
+            width="100%" height="420" style="border:0; border-radius:10px;" loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade">
+          </iframe>
+        </div>
+        <div class="satellite-note mono">Live satellite imagery via Google Maps — real UofSC campus, real time. <a href="https://www.google.com/maps/place/University+of+South+Carolina/" target="_blank" rel="noopener">Open in Google Maps ↗</a></div>
+      </div>
+    </section>
+
+    <!-- FEED -->
+    <section class="page" id="page-feed">
+      <div class="page-head"><h2>What people are saying</h2><p>Pinned by students, for students.</p></div>
+      <div class="corkboard">
+        <div class="composer">
+          <select id="postTag">
+            <option>Study Spot</option><option>Dining</option><option>Accessibility</option><option>Tip</option><option>Alert</option>
+          </select>
+          <input id="postInput" placeholder="Got a tip? Post it to the board...">
+          <button onclick="addPost()">Pin it</button>
+        </div>
+
+        <div class="refresh-note">🔄 Feed refreshes every 24 hours — <span id="refreshCountdown"></span></div>
+
+        <div class="grid-nav">
+          <button class="page-arrow" onclick="pagePosts(-1)" id="pageArrowLeft">‹</button>
+          <div class="cork-grid" id="postGrid"></div>
+          <button class="page-arrow" onclick="pagePosts(1)" id="pageArrowRight">›</button>
+        </div>
+        <div class="page-dots" id="pageDots"></div>
+      </div>
+    </section>
+
+    <!-- PEOPLE -->
+    <section class="page" id="page-people">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>PPL</span></div><h2>People at UofSC</h2><p>Find classmates, dorm neighbors, and friends of friends.</p></div>
+      <div class="requests-panel" id="requestsPanel"></div>
+      <div class="people-grid" id="peopleGrid"></div>
+    </section>
+
+    <!-- GROUPS -->
+    <section class="page" id="page-groups">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>GRP</span></div><h2>Groups</h2><p>Dorm floors, clubs, RA teams, class groups — one thread each, no separate app needed.</p></div>
+      <button class="save-btn" style="margin-bottom:16px;" onclick="openCreateGroupModal()">+ Create Group</button>
+      <div class="groups-layout">
+        <div class="group-list" id="groupList"></div>
+        <div class="group-chat" id="groupChat"></div>
+      </div>
+    </section>
+
+    <!-- MESSAGES (DMs) -->
+    <section class="page" id="page-messages">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>MSG</span></div><h2>Messages</h2><p>Direct messages between you and other students.</p></div>
+      <div class="groups-layout">
+        <div class="group-list" id="dmList"></div>
+        <div class="group-chat" id="dmChat"></div>
+      </div>
+    </section>
+
+    <!-- STUDY SPOTS -->
+    <!-- EVENTS -->
+    <section class="page" id="page-events">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>EVT</span></div><h2>Events</h2><p>What's happening on campus — RSVP and see who else is going.</p></div>
+      <button class="save-btn" style="margin-bottom:16px;" onclick="openCreateEventModal()">+ Create Event</button>
+      <div class="events-list" id="eventsList"></div>
+    </section>
+
+    <section class="page" id="page-study">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>STDY</span></div><h2>Study spots</h2><p>23 libraries, lounges, and outdoor spots across campus, ranked by students.</p></div>
+      <div class="map-search-wrap" style="max-width:480px;">
+        <input type="text" id="studySearchInput" class="map-search-input" placeholder="Search study spots — try &quot;quiet&quot; or &quot;library&quot;..." oninput="filterStudySpots(this.value)">
+      </div>
+      <div class="grid-nav">
+        <button class="page-arrow" onclick="pageStudy(-1)" id="studyArrowLeft">‹</button>
+        <div class="grid" id="studyGrid"></div>
+        <button class="page-arrow" onclick="pageStudy(1)" id="studyArrowRight">›</button>
+      </div>
+      <div class="page-dots" id="studyPageDots"></div>
+    </section>
+
+    <!-- DINING -->
+    <section class="page" id="page-dining">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>EAT</span></div><h2>Dining</h2><p>30+ places to eat across campus — dining halls, Russell House, and every satellite spot from Campus Village to North Campus.</p></div>
+      <div class="map-search-wrap" style="max-width:480px;">
+        <input type="text" id="diningSearchInput" class="map-search-input" placeholder="Search dining spots — try &quot;bagels&quot; or &quot;coffee&quot;..." oninput="filterDiningSpots(this.value)">
+      </div>
+      <div class="grid-nav">
+        <button class="page-arrow" onclick="pageDining(-1)" id="diningArrowLeft">‹</button>
+        <div class="grid" id="diningGrid"></div>
+        <button class="page-arrow" onclick="pageDining(1)" id="diningArrowRight">›</button>
+      </div>
+      <div class="page-dots" id="diningPageDots"></div>
+    </section>
+
+    <!-- GUIDELINES -->
+    <section class="page" id="page-guidelines">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>§</span></div><h2>Community guidelines</h2><p>Keeping CampusConnect a place students actually want to use.</p></div>
+
+      <div class="rules-block">
+        <div class="rule-item"><span class="rule-num mono">§ 01</span><div><h3>No slurs or hate speech</h3><p>In posts, comments, group chats, or usernames. This is checked automatically and reviewed by moderators.</p></div></div>
+        <div class="rule-item"><span class="rule-num mono">§ 02</span><div><h3>No sexual content</h3><p>CampusConnect is a campus utility, not a dating or adult platform. Keep it about campus life.</p></div></div>
+        <div class="rule-item"><span class="rule-num mono">§ 03</span><div><h3>No harassment or targeted abuse</h3><p>Disagreements happen. Targeting a specific person repeatedly does not fly here.</p></div></div>
+      </div>
+
+      <div class="strike-system">
+        <div class="requests-head">§ ENFORCEMENT LADDER</div>
+        <div class="strike-row"><span class="strike-badge">1st</span><span>Warning — a note explaining what was removed and why.</span></div>
+        <div class="strike-row"><span class="strike-badge">2nd</span><span>Warning — same as above, on record.</span></div>
+        <div class="strike-row"><span class="strike-badge">3rd</span><span>Warning — final notice before suspension.</span></div>
+        <div class="strike-row"><span class="strike-badge ban">6h</span><span>Temporary suspension — 6 hours, posting and commenting disabled.</span></div>
+        <div class="strike-row"><span class="strike-badge ban">24h</span><span>Temporary suspension — 24 hours, repeat violation.</span></div>
+        <div class="strike-row"><span class="strike-badge ban-perm">PERM</span><span>Permanent ban — account access revoked.</span></div>
+      </div>
+
+      <div class="appeal-box">
+        <h3>Appealing a decision</h3>
+        <p>Every suspension or ban can be appealed. Appeals go directly to the head moderator — Alyssia Gaston, founder of CampusConnect — not an automated system.</p>
+        <button class="save-btn" onclick="alert('This would open an appeal form to the head moderator once accounts are live.')">Start an appeal</button>
+      </div>
+
+      <div class="strike-demo">
+        <div class="requests-head">§ TRY IT — DEMO ONLY</div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:10px;">This simulates what happens when a post gets flagged. Nothing here is a real account action.</p>
+        <div class="composer" style="max-width:480px;">
+          <input id="demoFlagInput" placeholder="Type something to test the filter...">
+          <button onclick="testFlag()">Submit</button>
+        </div>
+        <div id="flagResult" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="page" id="page-about">
+      <div class="page-head"><div class="watermark" style="right:-10px; top:-30px;"><span>AG</span></div><h2>About CampusConnect</h2><p>Meet the person building it.</p></div>
+
+      <div class="about-hero">
+        <div class="about-hero-photo corner-bracket">
+          <img src="./about-photo.jpg" alt="Alyssia Gaston">
+        </div>
+        <div>
+          <h3 style="font-size:26px;margin-bottom:6px;">Alyssia Gaston</h3>
+          <div class="mono" style="font-size:12px;color:var(--garnet);letter-spacing:0.05em;margin-bottom:14px;">FOUNDER &amp; HEAD ADMINISTRATOR</div>
+          <div class="about-links">
+            <a href="https://github.com/alyssig" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://www.instagram.com/mochabytee/" target="_blank" rel="noopener">Instagram — @mochabytee</a>
+            <a href="https://alyssia-gaston.netlify.app" target="_blank" rel="noopener">Full Portfolio ↗</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="about-stats-strip">
+        <div class="about-stat"><div class="num">Jul 2026</div><div class="label">PROJECT STARTED</div></div>
+        <div class="about-stat"><div class="num">10</div><div class="label">FEATURES SHIPPED</div></div>
+        <div class="about-stat"><div class="num">20</div><div class="label">CAMPUS BUILDINGS MAPPED</div></div>
+        <div class="about-stat"><div class="num">Aug 18</div><div class="label">LAUNCH DAY</div></div>
+      </div>
+
+      <div class="about-section">
+        <div class="requests-head">§ THE STORY</div>
+        <p style="color:var(--gray);font-size:14.5px;margin-bottom:12px;max-width:60ch;">I'm a Computer Science student at the University of South Carolina building CampusConnect because our campus runs on four or five different apps that don't talk to each other — GroupMe for dorm floors, group chats for clubs, word of mouth for study spots, nothing at all for accessibility issues. I wanted one place students actually own, instead of piecing campus life together from apps that were never built for us specifically.</p>
+        <p style="color:var(--gray);font-size:14.5px;margin-bottom:12px;max-width:60ch;">It started as a single launch page, then grew into a working prototype with a map, a feed, groups, messaging, and a real moderation system — built the same way most real products get built: in public, one feature at a time, with a lot of user feedback along the way.</p>
+        <p style="color:var(--gray);font-size:14.5px;max-width:60ch;">As head admin, I personally review every appeal — this isn't going to be a platform where a bot decides your account's fate with no way to reach a real person.</p>
+      </div>
+
+      <div class="about-section">
+        <div class="requests-head">§ BUILD TIMELINE</div>
+        <div class="timeline">
+          <div class="timeline-item"><span class="timeline-dot"></span><div><strong>Launch page goes live</strong><span class="timeline-date">Campus, finally easy to navigate — the first public page.</span></div></div>
+          <div class="timeline-item"><span class="timeline-dot"></span><div><strong>Platform prototype built</strong><span class="timeline-date">Map, Feed, People, Study Spots, and Dining — the core experience.</span></div></div>
+          <div class="timeline-item"><span class="timeline-dot"></span><div><strong>Groups &amp; Messages added</strong><span class="timeline-date">Real-time-style chat threads, replacing GroupMe for campus groups.</span></div></div>
+          <div class="timeline-item"><span class="timeline-dot"></span><div><strong>Trust &amp; Safety system built</strong><span class="timeline-date">Content filtering, reporting, and a real enforcement ladder.</span></div></div>
+          <div class="timeline-item active"><span class="timeline-dot"></span><div><strong>Design polish &amp; search</strong><span class="timeline-date">Map search, live status indicators, and the visual identity you see now.</span></div></div>
+          <div class="timeline-item upcoming"><span class="timeline-dot"></span><div><strong>Aug 18, 2026 — Launch</strong><span class="timeline-date">Live for UofSC students.</span></div></div>
+        </div>
+      </div>
+
+      <div class="about-section roadmap-section">
+        <div class="requests-head">§ WHAT'S NEXT</div>
+        <div class="roadmap-grid">
+          <div class="roadmap-item"><span class="mono">01</span> Events with RSVP</div>
+          <div class="roadmap-item"><span class="mono">02</span> Saved &amp; bookmarked spots</div>
+          <div class="roadmap-item"><span class="mono">03</span> Busy / quiet indicators</div>
+          <div class="roadmap-item"><span class="mono">04</span> Real accounts &amp; backend</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROFILE -->
+    <section class="page" id="page-profile">
+      <div class="page-head"><div class="watermark" style="right:-20px; top:-30px;"><span>YOU</span></div><h2>Your profile</h2><p>Edit how you show up to other students on CampusConnect.</p></div>
+      <div class="profile-edit">
+        <div class="avatar-col">
+          <div class="avatar-big" id="avatarBig">GS</div>
+          <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="handlePhoto(event)">
+          <button class="upload-btn" onclick="document.getElementById('photoInput').click()">Upload photo</button>
+        </div>
+        <div>
+          <div class="field">
+            <label>DISPLAY NAME</label>
+            <input id="fieldName" value="Gamecock Student">
+          </div>
+          <div class="field">
+            <label>USERNAME</label>
+            <input id="fieldUsername" value="@newtocampus">
+          </div>
+          <div class="field">
+            <label>BIO</label>
+            <textarea id="fieldBio" placeholder="Tell campus a little about you...">Rising sophomore. Always looking for a quiet place to study and a decent coffee line.</textarea>
+          </div>
+          <button class="save-btn" onclick="saveProfile()">Save changes</button>
+          <div class="save-note" id="saveNote">✓ Saved — this session only, real accounts land once a backend's connected.</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="stat"><div class="num">3</div><div class="label">POSTS PINNED</div></div>
+        <div class="stat"><div class="num">12</div><div class="label">UPVOTES</div></div>
+        <div class="stat"><div class="num" id="friendCount">0</div><div class="label">FRIENDS</div></div>
+        <div class="stat"><div class="num" id="savedCount">0</div><div class="label">SAVED SPOTS</div></div>
+      </div>
+      <div class="badge-row">
+        <span class="badge">🔥 3-day login streak</span>
+        <span class="badge">🏅 Top contributor — Study Spots</span>
+        <span class="badge">🌱 Early member — joined before launch</span>
+      </div>
+      <div class="badge-note">Badges are illustrative for now — real streak tracking and contributor rankings need persistent accounts, which come with the backend.</div>
+
+      <div class="activity-header">§ MY ACTIVITY — everything you've saved, RSVP'd, and posted, in one place</div>
+
+      <div class="wall">
+        <div class="wall-head">§ SAVED SPOTS</div>
+        <div id="savedSpotsList"></div>
+      </div>
+      <div class="wall">
+        <div class="wall-head">§ MY EVENTS</div>
+        <div id="myEventsList"></div>
+      </div>
+      <div class="wall">
+        <div class="wall-head">§ YOUR WALL</div>
+        <div id="profileWall"></div>
+      </div>
+      <div class="backend-note">Photo, bio, and friend changes live only in this browser tab for now — once CampusConnect has real accounts, this becomes your actual profile other students see.</div>
+    </section>
+
+  </main>
+</div>
+
+<!-- SPOT DETAIL MODAL -->
+<div class="modal-overlay" id="spotModalOverlay">
+  <div class="modal-box" id="spotModalBody"></div>
+</div>
+
+<!-- PHOTO LIGHTBOX -->
+<div class="modal-overlay" id="photoLightboxOverlay" style="z-index:260;">
+  <div class="modal-box" id="photoLightboxBody"></div>
+</div>
+
+<!-- REPORT MODAL -->
+<div class="modal-overlay" id="reportModalOverlay">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="spot-modal-head">
+      <h2 style="font-size:18px;">Report <span id="reportTargetName" style="color:var(--garnet);"></span></h2>
+      <button class="modal-close" onclick="closeReportModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="field">
+      <label>WHY ARE YOU REPORTING THIS?</label>
+      <textarea id="reportReason" placeholder="Explain what happened..."></textarea>
+    </div>
+    <input type="file" id="reportScreenshotInput" accept="image/*" style="display:none" onchange="handleReportScreenshot(event)">
+    <button class="upload-btn" onclick="document.getElementById('reportScreenshotInput').click()">Attach a screenshot (optional)</button>
+    <div id="reportScreenshotPreview"></div>
+    <button class="save-btn" style="width:100%;margin-top:14px;" onclick="submitReport()">Submit report</button>
+    <div class="save-note" id="reportConfirm">✓ Report sent to the moderation team for review.</div>
+  </div>
+</div>
+
+<!-- CREATE GROUP MODAL -->
+<div class="modal-overlay" id="createGroupModalOverlay">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="spot-modal-head">
+      <h2 style="font-size:18px;">Create a group</h2>
+      <button class="modal-close" onclick="closeCreateGroupModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="field">
+      <label>GROUP NAME</label>
+      <input type="text" id="newGroupName" placeholder="e.g. Bates House 2nd Floor">
+    </div>
+    <div class="field">
+      <label>GROUP TYPE</label>
+      <select id="newGroupType" style="width:100%; border:1px solid var(--line); padding:9px 12px; font-family:'Inter',sans-serif; font-size:13.5px;">
+        <option>Dorm</option><option>Club</option><option>Staff</option><option>Class</option><option>Friends</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>SHORT DESCRIPTION (OPTIONAL)</label>
+      <textarea id="newGroupDesc" placeholder="What's this group for?"></textarea>
+    </div>
+    <div class="mod-note" style="display:block; margin-bottom:12px;">No inappropriate names, descriptions, or group chats — violations get reported and reviewed, same as everywhere else on CampusConnect.</div>
+    <div id="createGroupError" style="display:none; color:var(--garnet); font-size:12.5px; margin-bottom:10px;"></div>
+    <button class="save-btn" style="width:100%;" onclick="submitCreateGroup()">Create group</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="createEventModalOverlay">
+  <div class="modal-box" style="max-width:460px;">
+    <div class="spot-modal-head">
+      <h2 style="font-size:18px;">Create an event</h2>
+      <button class="modal-close" onclick="closeCreateEventModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="field">
+      <label>EVENT TITLE</label>
+      <input type="text" id="newEventTitle" placeholder="e.g. Intramural Kickball Sign-Ups">
+    </div>
+    <div style="display:flex; gap:10px;">
+      <div class="field" style="flex:1;">
+        <label>MONTH</label>
+        <input type="text" id="newEventMonth" placeholder="AUG" maxlength="3" style="text-transform:uppercase;">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>DAY</label>
+        <input type="text" id="newEventDay" placeholder="27" maxlength="2">
+      </div>
+      <div class="field" style="flex:2;">
+        <label>TIME</label>
+        <input type="text" id="newEventTime" placeholder="6:00 PM">
+      </div>
+    </div>
+    <div class="field">
+      <label>LOCATION</label>
+      <input type="text" id="newEventLocation" placeholder="e.g. Greene Street">
+    </div>
+    <div class="field">
+      <label>CATEGORY</label>
+      <select id="newEventTag" style="width:100%; border:1px solid var(--line); padding:9px 12px; font-family:'Inter',sans-serif; font-size:13.5px;">
+        <option>Club</option><option>Athletics</option><option>Dorm</option><option>Campus-Wide</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>DESCRIPTION</label>
+      <textarea id="newEventDesc" placeholder="What's happening?"></textarea>
+    </div>
+    <div class="mod-note" style="display:block; margin-bottom:12px;">No inappropriate titles or descriptions — violations get reported and reviewed, same as everywhere else on CampusConnect.</div>
+    <div id="createEventError" style="display:none; color:var(--garnet); font-size:12.5px; margin-bottom:10px;"></div>
+    <button class="save-btn" style="width:100%;" onclick="submitCreateEvent()">Create event</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="reportIssueModalOverlay">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="spot-modal-head">
+      <h2 style="font-size:18px;">Report an issue</h2>
+      <button class="modal-close" onclick="closeReportIssueModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="field">
+      <label>CATEGORY</label>
+      <select id="issueCategory" style="width:100%; border:1px solid var(--line); padding:9px 12px; font-family:'Inter',sans-serif; font-size:13.5px;">
+        <option>Accessibility</option><option>Safety</option><option>Maintenance</option><option>Other</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>LOCATION</label>
+      <select id="issueBuilding" style="width:100%; border:1px solid var(--line); padding:9px 12px; font-family:'Inter',sans-serif; font-size:13.5px;"></select>
+    </div>
+    <div class="field">
+      <label>WHAT'S WRONG?</label>
+      <textarea id="issueDesc" placeholder="e.g. East elevator has been out for a week"></textarea>
+    </div>
+    <div class="mod-note" style="display:block; margin-bottom:12px;">Reports are visible to other students on the map — no inappropriate content, same rules as everywhere else.</div>
+    <div id="issueError" style="display:none; color:var(--garnet); font-size:12.5px; margin-bottom:10px;"></div>
+    <button class="save-btn" style="width:100%;" onclick="submitIssueReport()">Submit report</button>
+  </div>
+</div>
+
+<script>
+  /*
+    A note on how this file is organized, since it's one big script tag:
+
+    Each feature (Feed, Map, People, Groups, Events, etc.) follows the same
+    three-part pattern:
+      1. A data array/object holding that feature's fake data (e.g. `posts`,
+         `events`, `buildingData`).
+      2. A render function that rebuilds the relevant DOM from that data
+         (e.g. `renderPosts()`, `renderEvents()`).
+      3. Action functions the UI calls on click (e.g. `toggleLike()`,
+         `toggleRsvp()`) that mutate the data, then call the render function
+         again to reflect the change.
+
+    That "mutate data, then re-render" loop is the same idea React/Vue give
+    you for free — it's just done by hand here since the app doesn't use a
+    framework. It's more code than a framework version, but it means this
+    can run as a single file with zero build tooling.
+  */
+
+  /* ---------- TAB SWITCHING ---------- */
+  // Single-page app: all tabs are pre-rendered in the DOM, we just toggle which .page
+  // has the 'active' class. No routing library needed for something this size.
+  function switchToPage(pageName){
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.page === pageName);
+    });
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + pageName).classList.add('active');
+  }
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchToPage(btn.dataset.page));
+  });
+
+  /* ---------- GLOBAL SEARCH ---------- */
+  // Searches posts, people, groups, and events client-side by filtering in-memory arrays.
+  // Once there's a real backend this should move server-side (full-text search).
+  function runGlobalSearch(query){
+    const resultsEl = document.getElementById('globalSearchResults');
+    const q = query.trim().toLowerCase();
+    if(!q){
+      resultsEl.classList.remove('show');
+      resultsEl.innerHTML = '';
+      return;
+    }
+
+    const postMatches = posts.filter(p => p.title.toLowerCase().includes(q) || p.body.toLowerCase().includes(q)).slice(0, 4);
+    const peopleMatches = people.filter(p => p.name.toLowerCase().includes(q) || p.handle.toLowerCase().includes(q)).slice(0, 4);
+    const groupMatches = Object.entries(groups).filter(([key, g]) => g.name.toLowerCase().includes(q)).slice(0, 4);
+    const eventMatches = events.filter(e => e.title.toLowerCase().includes(q) || e.desc.toLowerCase().includes(q)).slice(0, 4);
+
+    let html = '';
+    if(postMatches.length){
+      html += '<div class="gs-group-label">§ POSTS</div>';
+      html += postMatches.map(p => `<div class="gs-result-item" onclick="goToSearchResult('feed')"><div>${p.title}</div><div class="gs-sub">@${p.author}</div></div>`).join('');
+    }
+    if(peopleMatches.length){
+      html += '<div class="gs-group-label">§ PEOPLE</div>';
+      html += peopleMatches.map(p => `<div class="gs-result-item" onclick="goToSearchResult('people')"><div>${p.name}</div><div class="gs-sub">${p.handle}</div></div>`).join('');
+    }
+    if(groupMatches.length){
+      html += '<div class="gs-group-label">§ GROUPS</div>';
+      html += groupMatches.map(([key, g]) => `<div class="gs-result-item" onclick="goToSearchResult('groups', '${key}')"><div>${g.name}</div><div class="gs-sub">${g.meta}</div></div>`).join('');
+    }
+    if(eventMatches.length){
+      html += '<div class="gs-group-label">§ EVENTS</div>';
+      html += eventMatches.map(e => `<div class="gs-result-item" onclick="goToSearchResult('events')"><div>${e.title}</div><div class="gs-sub">${e.month} ${e.day} · ${e.location}</div></div>`).join('');
+    }
+
+    resultsEl.innerHTML = html || '<div class="gs-empty">No matches across posts, people, groups, or events.</div>';
+    resultsEl.classList.add('show');
+  }
+
+  function goToSearchResult(page, extraKey){
+    switchToPage(page);
+    if(page === 'groups' && extraKey && typeof selectGroup === 'function') selectGroup(extraKey);
+    document.getElementById('globalSearchResults').classList.remove('show');
+    document.getElementById('globalSearchInput').value = '';
+  }
+
+  document.addEventListener('click', (e) => {
+    const wrap = document.querySelector('.global-search-wrap');
+    if(wrap && !wrap.contains(e.target)) document.getElementById('globalSearchResults').classList.remove('show');
+  });
+
+  /* ---------- NOTIFICATIONS ---------- */
+  // Static mock notifications for now — real ones would come from the backend once actions
+  // (likes, comments, friend requests) are actually persisted somewhere.
+  function toggleNotifs(){
+    document.getElementById('notifDropdown').classList.toggle('show');
+  }
+  document.addEventListener('click', (e) => {
+    const wrap = document.querySelector('.notif-wrap');
+    if(wrap && !wrap.contains(e.target)) document.getElementById('notifDropdown').classList.remove('show');
+  });
+
+  /* ---------- MAP: drag to pan ---------- */
+  // Hand-rolled drag-to-pan (no map library) since this is an illustrated SVG map, not real
+  // geodata. Tracks the mouse offset from wherever the drag started.
+  const viewport = document.getElementById('mapViewport');
+  const canvas = document.getElementById('mapCanvas');
+  let panX = -300, panY = -150, dragging = false, startX, startY;
+  function applyPan(){ canvas.style.transform = `translate(${panX}px, ${panY}px)`; }
+  applyPan();
+
+  viewport.addEventListener('mousedown', (e) => {
+    dragging = true; viewport.classList.add('dragging');
+    startX = e.clientX - panX; startY = e.clientY - panY;
+  });
+  window.addEventListener('mousemove', (e) => {
+    if(!dragging) return;
+    panX = e.clientX - startX; panY = e.clientY - startY;
+    applyPan();
+  });
+  window.addEventListener('mouseup', () => { dragging = false; viewport.classList.remove('dragging'); });
+  function nudgeMap(dx, dy){ panX += dx; panY += dy; applyPan(); }
+
+  const buildingData = {
+    desaussure: { tag:'Historic', name:'DeSaussure College', body:'Completed in 1809, one of the two oldest buildings on the Horseshoe. Mixes student housing with academic offices today.', icon:'🏛️', walk:'9 min walk', x:529, y:229 },
+    rutledge: { tag:'Historic', name:'Rutledge College', body:'Opened in 1805 as the very first building on campus. Still used for housing and classes.', icon:'🏛️', walk:'9 min walk', x:529, y:329 },
+    elliott: { tag:'Dorm', name:'Elliott College', body:'Built in 1837, part of the historic Horseshoe ring. Used as student housing today.', icon:'🏠', walk:'10 min walk', x:549, y:429 },
+    pinckney: { tag:'Dorm', name:'Pinckney College', body:'Also built in the 1830s as a twin to Elliott College. Still a residence hall.', icon:'🏠', walk:'10 min walk', x:909, y:229 },
+    harper: { tag:'Historic', name:'Harper College', body:'Built in 1848, twin building to Legare College. Now mixes housing with administrative offices.', icon:'🏛️', walk:'11 min walk', x:909, y:329 },
+    legare: { tag:'Historic', name:'Legare College', body:'Built in 1848. Housed many of the first Black students admitted after integration in the 1870s.', icon:'🏛️', walk:'11 min walk', x:889, y:429 },
+    mckissick: { tag:'Museum', name:'McKissick Museum', body:'Built in 1940, originally planned as the main university library. Now home to the campus museum collections.', icon:'🖼️', walk:'8 min walk', x:729, y:479 },
+    longstreet: { tag:'Arts', name:'Longstreet Theatre', body:'Dates to 1855 and briefly served as a Civil War hospital. Converted into a theater-in-the-round in the 1970s.', icon:'🎭', walk:'7 min walk', x:649, y:199 },
+    cooper: { tag:'Study Spot', name:'Thomas Cooper Library', body:'The map room on floor 2 is basically empty even during finals week. Bring headphones anyway.', icon:'📚', walk:'6 min walk', x:729, y:609 },
+    russell: { tag:'Student Union', name:'Russell House', body:'Built in 1955, the main student union. Einstein Bros lobby has zero line before 10am.', icon:'🍽️', walk:'4 min walk', x:529, y:649 },
+    closehipp: { tag:'Academic', name:'Close-Hipp', body:'Home to Hospitality, Retail and Sport Management programs. East elevator has been down for two weeks.', icon:'🏢', walk:'9 min walk', x:1009, y:569 },
+    moore: { tag:'Academic', name:'Darla Moore School of Business', body:'Opened in 2013. Named after the first woman to have a major business school named after her.', icon:'🏢', walk:'12 min walk', x:1229, y:489 },
+    swearingen: { tag:'Academic', name:'Swearingen Engineering Center', body:'Built in 1987 to give the growing engineering school more space.', icon:'⚙️', walk:'13 min walk', x:1259, y:649 },
+    preston: { tag:'Dorm', name:'Preston College', body:'Preston has the best dorm rooms on campus hands down — ask for a 2nd floor.', icon:'🏠', walk:'3 min walk', x:409, y:769 },
+    wadehampton: { tag:'Dorm', name:'Wade Hampton', body:'Part of the original womens residence cluster, rebuilt in the 1960s. Now open to all students.', icon:'🏠', walk:'2 min walk', x:289, y:849 },
+    thomson: { tag:'Wellness', name:'Thomson Student Health Center', body:'Built in 1973, today focused on student mental health and wellbeing services.', icon:'⛑️', walk:'5 min walk', x:609, y:809 },
+    strom: { tag:'Wellness', name:'Strom Thurmond Wellness Center', body:'Opened in 2003. The main fitness and wellness facility on campus.', icon:'💪', walk:'7 min walk', x:909, y:799 },
+    koger: { tag:'Arts', name:'Koger Center for the Arts', body:'Built in 1988. The main performing arts venue on campus.', icon:'🎭', walk:'15 min walk', x:1409, y:409 },
+    colonial: { tag:'Athletics', name:'Colonial Life Arena', body:'Home to Gamecock basketball and major campus concerts and events.', icon:'🏟️', walk:'14 min walk', x:1429, y:809 },
+    williamsbrice: { tag:'Athletics', name:'Williams-Brice Stadium', body:'Originally built in the 1930s, expanded decades later into the current football stadium.', icon:'🏈', walk:'18 min walk', x:259, y:1009 },
+  };
+
+  function selectBuilding(key){
+    const d = buildingData[key];
+    const el = document.getElementById('mapInfo');
+    el.innerHTML = `
+      <div class="building-preview"><span style="font-size:36px;">${d.icon}</span></div>
+      <div class="map-info-body">
+        <span class="tag">${d.tag.toUpperCase()}</span>
+        <h3>${d.name}</h3>
+        <p>${d.body}</p>
+        <div class="route-line">→ ${d.walk} from Greene St.</div>
+      </div>`;
+    el.classList.add('show');
+
+    const path = document.getElementById('routePath');
+    path.setAttribute('d', `M409 909 L${d.x} ${d.y}`);
+    path.setAttribute('opacity', '1');
+  }
+
+  /* ---------- REPORT AN ISSUE (map pins) ---------- */
+  // Lets students flag real problems (broken elevators, safety concerns) on the map.
+  // Pins are session-only for now; a real version would need these to persist and route somewhere.
+  const issueReports = [];
+  let nextIssueId = 1;
+
+  function openReportIssueModal(){
+    const select = document.getElementById('issueBuilding');
+    select.innerHTML = Object.keys(buildingData).map(key =>
+      `<option value="${key}">${buildingData[key].name}</option>`
+    ).join('');
+    document.getElementById('issueDesc').value = '';
+    document.getElementById('issueError').style.display = 'none';
+    document.getElementById('reportIssueModalOverlay').classList.add('show');
+  }
+  function closeReportIssueModal(){
+    document.getElementById('reportIssueModalOverlay').classList.remove('show');
+  }
+  function submitIssueReport(){
+    const category = document.getElementById('issueCategory').value;
+    const buildingKey = document.getElementById('issueBuilding').value;
+    const desc = document.getElementById('issueDesc').value.trim();
+    const errorEl = document.getElementById('issueError');
+
+    if(!desc){
+      errorEl.textContent = 'Describe what the issue is.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if(isFlaggedText(desc)){
+      errorEl.textContent = 'That description was blocked by the content filter.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    const b = buildingData[buildingKey];
+    const user = getCurrentUserInfo();
+    issueReports.push({
+      id: 'issue' + (nextIssueId++), category, desc, buildingName: b.name,
+      x: b.x + 18, y: b.y - 18, reporter: user.name,
+    });
+    closeReportIssueModal();
+    renderIssuePins();
+  }
+
+  function renderIssuePins(){
+    document.querySelectorAll('.issue-pin').forEach(p => p.remove());
+    const canvas = document.getElementById('mapCanvas');
+    issueReports.forEach(issue => {
+      const pin = document.createElement('div');
+      pin.className = 'building issue-pin';
+      pin.style.left = issue.x + 'px';
+      pin.style.top = issue.y + 'px';
+      pin.innerHTML = `<div class="issue-pin-mark" onclick="showIssueDetail('${issue.id}')" role="button" tabindex="0" aria-label="Reported issue: ${issue.category}" onkeydown="if(event.key==='Enter')showIssueDetail('${issue.id}')">⚠</div><div class="pin-label">${issue.category}</div>`;
+      canvas.appendChild(pin);
+    });
+  }
+
+  function showIssueDetail(id){
+    const issue = issueReports.find(i => i.id === id);
+    const el = document.getElementById('mapInfo');
+    el.innerHTML = `
+      <div class="building-preview"><span style="font-size:36px;">⚠</span></div>
+      <div class="map-info-body">
+        <span class="tag">${issue.category.toUpperCase()}</span>
+        <h3>${issue.buildingName}</h3>
+        <p>${issue.desc}</p>
+        <div class="route-line">Reported by ${issue.reporter}</div>
+      </div>`;
+    el.classList.add('show');
+  }
+
+
+  function matchesQuery(key, query){
+    const d = buildingData[key];
+    const q = query.toLowerCase();
+    return d.name.toLowerCase().includes(q) || d.tag.toLowerCase().includes(q) || d.body.toLowerCase().includes(q);
+  }
+
+  function filterMapBuildings(query){
+    const resultsEl = document.getElementById('mapSearchResults');
+    const trimmed = query.trim();
+
+    document.querySelectorAll('.building[data-key]').forEach(pin => {
+      const key = pin.dataset.key;
+      if(!trimmed){
+        pin.classList.remove('dimmed', 'highlighted');
+      } else if(matchesQuery(key, trimmed)){
+        pin.classList.remove('dimmed');
+        pin.classList.add('highlighted');
+      } else {
+        pin.classList.add('dimmed');
+        pin.classList.remove('highlighted');
+      }
+    });
+
+    if(!trimmed){
+      resultsEl.classList.remove('show');
+      resultsEl.innerHTML = '';
+      return;
+    }
+
+    const matches = Object.keys(buildingData).filter(key => matchesQuery(key, trimmed));
+    if(matches.length === 0){
+      resultsEl.innerHTML = '<div class="map-search-empty">No buildings match — try a different term.</div>';
+    } else {
+      resultsEl.innerHTML = matches.map(key => {
+        const d = buildingData[key];
+        return `<div class="map-search-result-item" onclick="jumpToBuilding('${key}')"><span>${d.icon} ${d.name}</span><span class="tag">${d.tag.toUpperCase()}</span></div>`;
+      }).join('');
+    }
+    resultsEl.classList.add('show');
+  }
+
+  function jumpToBuilding(key){
+    const d = buildingData[key];
+    panX = -(d.x - 400);
+    panY = -(d.y - 200);
+    applyPan();
+    selectBuilding(key);
+    document.querySelectorAll('.building[data-key]').forEach(pin => {
+      pin.classList.toggle('highlighted', pin.dataset.key === key);
+      pin.classList.remove('dimmed');
+    });
+    document.getElementById('mapSearchResults').classList.remove('show');
+  }
+
+  function jumpToFirstMatch(query){
+    const trimmed = query.trim();
+    if(!trimmed) return;
+    const match = Object.keys(buildingData).find(key => matchesQuery(key, trimmed));
+    if(match) jumpToBuilding(match);
+  }
+
+  document.addEventListener('click', (e) => {
+    const wrap = document.querySelector('.map-search-wrap');
+    if(wrap && !wrap.contains(e.target)) document.getElementById('mapSearchResults').classList.remove('show');
+  });
+
+
+  /* ---------- FEED ---------- */
+  // Core social feed: posts, likes, shares, comments. Everything lives in the `posts` array
+  // in memory, which is exactly why it resets on refresh — first thing to wire to a real backend.
+  let posts = [
+    { id:1, tag:'Study Spot', author:'junior_jess', time:'12m ago', title:'Hidden gem in Cooper', body:'The map room on floor 2 of Thomas Cooper is basically empty even during finals week. Bring headphones anyway.', likes:34, comments:[
+      { user:'night_owl', text:'can confirm, been going here all week' },
+      { user:'carolina_eats', text:'wait which floor is the map room on' },
+    ]},
+    { id:2, tag:'Dining', author:'carolina_eats', time:'26m ago', title:'Skip the RH lines', body:'Einstein Bros in the Close-Hipp lobby has zero line before 10am and the same bagels.', likes:29, comments:[
+      { user:'sophomore_sam', text:'game changer, thank you' },
+    ]},
+    { id:3, tag:'Tip', author:'sophomore_sam', time:'41m ago', title:'Parking near the Horseshoe', body:'Bull St garage is always emptier than the Blossom St deck and it is a 5 min walk to most classes.', likes:47, comments:[] },
+    { id:4, tag:'Accessibility', author:'access_uofsc', time:'1h ago', title:'Elevator in Close-Hipp', body:'The east elevator has been down for two weeks, use the one by the courtyard entrance instead.', likes:19, comments:[
+      { user:'junior_jess', text:'been like this since last semester unfortunately' },
+    ]},
+    { id:5, tag:'Study Spot', author:'night_owl', time:'2h ago', title:'Green Quad lounge', body:'24 hour lounge, way quieter than the library and the couches are actually comfortable.', likes:15, comments:[] },
+    { id:6, tag:'Alert', author:'access_uofsc', time:'3h ago', title:'Construction near Greene St.', body:'Fencing is up outside the courtyard entrance through Friday — detour through the Russell House side.', likes:22, comments:[] },
+  ];
+  const tagColors = { 'Study Spot':'#0B0B0C', 'Dining':'#73000A', 'Accessibility':'#4A0007', 'Tip':'#73000A', 'Alert':'#73000A' };
+  function hexToRgba(hex, alpha){
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  function tagPillStyle(tag){
+    const c = tagColors[tag] || '#73000A';
+    return `background:${hexToRgba(c, 0.14)}; color:${c};`;
+  }
+  const liked = {};
+  const shared = {};
+  let nextId = 7;
+
+  const POSTS_PER_PAGE = 6;
+  let currentPostPage = 0;
+
+  function renderPosts(){
+    const totalPages = Math.max(1, Math.ceil(posts.length / POSTS_PER_PAGE));
+    if(currentPostPage >= totalPages) currentPostPage = totalPages - 1;
+    if(currentPostPage < 0) currentPostPage = 0;
+    const start = currentPostPage * POSTS_PER_PAGE;
+    const pagePosts_ = posts.slice(start, start + POSTS_PER_PAGE);
+
+    const grid = document.getElementById('postGrid');
+    grid.innerHTML = pagePosts_.map((p, i) => `
+      <div class="note">
+        ${i % 3 === 1 ? '<div class="washi-corner" style="top:-8px; left:-14px; transform:rotate(-40deg);"></div>' : ''}
+        <span class="note-tag" style="${tagPillStyle(p.tag)}">${p.tag.toUpperCase()}</span>
+        ${p.author === 'you' ? `
+          <div class="own-post-controls">
+            <button onclick="startEditPost(${p.id})" aria-label="Edit post">✏️</button>
+            <button onclick="deletePost(${p.id})" aria-label="Delete post">🗑️</button>
+          </div>
+        ` : ''}
+        <div id="postView-${p.id}">
+          <h3>${p.title}</h3>
+          <p>${p.body}</p>
+        </div>
+        <div class="note-foot">
+          <span>@${p.author} · ${p.time}${p.edited ? ' · <em>edited</em>' : ''}</span>
+        </div>
+        <div class="reaction-row" style="margin-top:10px;">
+          <button class="react-btn ${liked[p.id] ? 'active' : ''}" onclick="toggleLike(${p.id})">👍 <span id="likecount-${p.id}">${p.likes}</span></button>
+          <button class="share-btn ${shared[p.id] ? 'shared' : ''}" onclick="toggleShare(${p.id})">${shared[p.id] ? '✓ Shared' : '↗ Share'}</button>
+        </div>
+        <button class="comment-toggle" onclick="toggleComments(${p.id})">${p.comments.length} comments</button>
+        <div class="comment-thread" id="thread-${p.id}">
+          ${p.comments.map(c => `<div class="comment"><strong>@${c.user}:</strong> ${c.text}</div>`).join('')}
+          <div class="comment-add">
+            <input type="text" placeholder="Add a comment..." id="commentInput-${p.id}">
+            <button onclick="addComment(${p.id})">Send</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    const leftArrow = document.getElementById('pageArrowLeft');
+    const rightArrow = document.getElementById('pageArrowRight');
+    if(leftArrow) leftArrow.disabled = currentPostPage === 0;
+    if(rightArrow) rightArrow.disabled = currentPostPage >= totalPages - 1;
+
+    const dots = document.getElementById('pageDots');
+    if(dots){
+      dots.innerHTML = Array.from({length: totalPages}).map((_, i) =>
+        `<span class="${i === currentPostPage ? 'active' : ''}"></span>`
+      ).join('');
+    }
+  }
+
+  function pagePosts(direction){
+    currentPostPage += direction;
+    renderPosts();
+  }
+
+  function updateRefreshCountdown(){
+    const now = new Date();
+    const next = new Date();
+    next.setHours(24, 0, 0, 0);
+    const diff = next - now;
+    const h = Math.floor(diff / (1000*60*60));
+    const m = Math.floor((diff / (1000*60)) % 60);
+    const el = document.getElementById('refreshCountdown');
+    if(el) el.textContent = `next refresh in ${h}h ${m}m`;
+  }
+  updateRefreshCountdown();
+  setInterval(updateRefreshCountdown, 60000);
+
+  function toggleLike(id){
+    const post = posts.find(p => p.id === id);
+    if(liked[id]){ liked[id] = false; post.likes -= 1; }
+    else { liked[id] = true; post.likes += 1; }
+    renderPosts();
+    renderProfileWall();
+  }
+
+  function toggleShare(id){
+    shared[id] = !shared[id];
+    renderPosts();
+  }
+
+  function renderProfileWall(){
+    const mine = posts.filter(p => p.author === 'you');
+    const wall = document.getElementById('profileWall');
+    if(mine.length === 0){
+      wall.innerHTML = '<div class="wall-empty">You have not pinned anything yet — posts you share to the Feed show up here.</div>';
+      return;
+    }
+    wall.innerHTML = mine.map(p => `
+      <div class="note" style="margin-bottom:14px;">
+        <span class="note-tag" style="${tagPillStyle(p.tag)}">${p.tag.toUpperCase()}</span>
+        <h3>${p.title}</h3>
+        <p>${p.body}</p>
+        <div class="note-foot"><span>${p.time}</span><span>👍 ${p.likes}</span></div>
+      </div>
+    `).join('');
+  }
+
+  function toggleComments(id){
+    const thread = document.getElementById(`thread-${id}`);
+    thread.classList.toggle('show');
+  }
+
+  function addComment(id){
+    const input = document.getElementById(`commentInput-${id}`);
+    const text = input.value.trim();
+    if(!text) return;
+    const post = posts.find(p => p.id === id);
+    post.comments.push({ user:'you', text });
+    renderPosts();
+    document.getElementById(`thread-${id}`).classList.add('show');
+  }
+
+  function addPost(){
+    const input = document.getElementById('postInput');
+    const tag = document.getElementById('postTag').value;
+    const text = input.value.trim();
+    if(!text) return;
+    if(isFlaggedText(text)){
+      alert('That post was blocked by the content filter. Please rephrase — no slurs, hate speech, or inappropriate content.');
+      return;
+    }
+    posts.unshift({ id: nextId++, tag, author:'you', time:'just now', title: text.length > 42 ? text.slice(0,42) + '…' : text, body: text, likes:0, comments:[] });
+    input.value = '';
+    currentPostPage = 0;
+    renderPosts();
+    renderProfileWall();
+  }
+
+  function startEditPost(id){
+    const post = posts.find(p => p.id === id);
+    if(!post) return;
+    const container = document.getElementById(`postView-${id}`);
+    container.innerHTML = `
+      <textarea id="editBody-${id}" class="edit-post-textarea">${post.body}</textarea>
+      <div class="edit-post-actions">
+        <button class="save-btn" onclick="saveEditPost(${id})">Save</button>
+        <button class="btn-ghost-small" onclick="renderPosts()">Cancel</button>
+      </div>
+    `;
+  }
+
+  function saveEditPost(id){
+    const post = posts.find(p => p.id === id);
+    const newBody = document.getElementById(`editBody-${id}`).value.trim();
+    if(!newBody) return;
+    if(isFlaggedText(newBody)){
+      alert('That edit was blocked by the content filter. Please rephrase — no slurs, hate speech, or inappropriate content.');
+      return;
+    }
+    post.body = newBody;
+    post.title = newBody.length > 42 ? newBody.slice(0,42) + '…' : newBody;
+    post.edited = true;
+    renderPosts();
+    renderProfileWall();
+  }
+
+  function deletePost(id){
+    if(!confirm('Delete this post? This cannot be undone.')) return;
+    posts = posts.filter(p => p.id !== id);
+    renderPosts();
+    renderProfileWall();
+  }
+
+  /* ---------- PEOPLE ---------- */
+  // Mock student directory plus the friend request flow (send -> pending -> accept/decline),
+  // built to mirror how a real social graph would work once accounts exist.
+  const people = [
+    { id:1, name:'Jess Reyes', handle:'@junior_jess', meta:'Junior · Same dorm floor' },
+    { id:2, name:'Maya Oduya', handle:'@carolina_eats', meta:'Sophomore · CS major' },
+    { id:3, name:'Sam Patel', handle:'@sophomore_sam', meta:'Sophomore · Greene St.' },
+    { id:4, name:'Tyler Park', handle:'@t_park', meta:'Senior · Accessibility advocate' },
+    { id:5, name:'Jordan Reyes', handle:'@night_owl', meta:'Junior · 24hr lounge regular' },
+    { id:6, name:'Ava Chen', handle:'@access_uofsc', meta:'Grad student · Close-Hipp' },
+  ];
+  const friended = {};
+  const pending = {};
+
+  function initials(name){ return name.split(' ').map(w => w[0]).join(''); }
+
+  function renderPeople(){
+    document.getElementById('peopleGrid').innerHTML = people.map(p => {
+      let label = '+ Add Friend', cls = '';
+      if(friended[p.id]){ label = '✓ Friends'; cls = 'added'; }
+      else if(pending[p.id]){ label = '⏳ Request sent'; cls = 'pending'; }
+      return `
+      <div class="person-card">
+        <div class="person-avatar">${initials(p.name)}</div>
+        <h3>${p.name}</h3>
+        <div class="person-meta">${p.handle} · ${p.meta}</div>
+        <button class="friend-btn ${cls}" onclick="sendFriendRequest(${p.id})">${label}</button>
+        <button class="report-link" onclick="openReportModal('${p.handle}')">Report user</button>
+      </div>`;
+    }).join('');
+  }
+
+  function sendFriendRequest(id){
+    if(friended[id] || pending[id]) return;
+    pending[id] = true;
+    renderPeople();
+  }
+
+  let incomingRequests = [
+    { id:101, name:'Devon Marsh', handle:'@d.marsh', meta:'Sophomore · Preston College' },
+    { id:102, name:'Priya Nair', handle:'@p.nair', meta:'Junior · Close-Hipp lab' },
+  ];
+
+  function renderRequests(){
+    const panel = document.getElementById('requestsPanel');
+    if(incomingRequests.length === 0){ panel.innerHTML = ''; return; }
+    panel.innerHTML = `
+      <div class="requests-head">§ FRIEND REQUESTS (${incomingRequests.length})</div>
+      ${incomingRequests.map(r => `
+        <div class="request-row">
+          <div class="request-left">
+            <div class="request-avatar">${initials(r.name)}</div>
+            <div>
+              <div class="request-name">${r.name}</div>
+              <div class="request-meta">${r.handle} · ${r.meta}</div>
+            </div>
+          </div>
+          <div class="request-actions">
+            <button class="accept-btn" onclick="respondRequest(${r.id}, true)">Accept</button>
+            <button class="decline-btn" onclick="respondRequest(${r.id}, false)">Decline</button>
+          </div>
+        </div>
+      `).join('')}
+    `;
+  }
+
+  function respondRequest(id, accepted){
+    incomingRequests = incomingRequests.filter(r => r.id !== id);
+    if(accepted) updateFriendCount(1);
+    renderRequests();
+  }
+
+  function updateFriendCount(delta){
+    const el = document.getElementById('friendCount');
+    el.textContent = parseInt(el.textContent) + delta;
+  }
+
+  /* ---------- STUDY / DINING GRIDS ---------- */
+  // Shared rendering pattern for Study Spots and Dining: same card layout, same detail
+  // modal, just pointed at different data arrays.
+  const studySpots = [
+    { id:'study1', name:'Thomas Cooper Library (T-Coop)', ref:'CC-STUDY-01', note:'The icon, the moment. 7 levels — silent carrels on 1 and 3, reservable group rooms below. Packed during exams.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], comments:[
+      { user:'junior_jess', text:'Map room on floor 2 is empty even during finals, bring headphones.' },
+      { user:'night_owl', text:'4th floor after midnight is unreal quiet.' },
+    ]},
+    { id:'study2', name:'Green Quad Learning Center', ref:'CC-STUDY-02', note:'Comfy couches, rarely full.', stars:5, photoHues:['#4A0007','#8a3a44'], comments:[
+      { user:'sophomore_sam', text:'Best couches on campus, no contest.' },
+    ]},
+    { id:'study3', name:'Academic Advising Center (Close-Hipp, 3rd Floor)', ref:'CC-STUDY-03', note:'Bright, modern, and loaded with outlets — plus a microwave for snacks. Convenient for Columbia Hall and Capstone residents.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+    { id:'study4', name:'Preston College lounge', ref:'CC-STUDY-04', note:'Small, but always quiet.', stars:3, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study5', name:'TCL Level 5 — Grad Study Space', ref:'CC-STUDY-05', note:'Swipe access with your CarolinaCard. Reservable group rooms, quiet by design.', stars:5, photoHues:['#4A0007','#8a3a44'], comments:[
+      { user:'access_uofsc', text:'Best floor in the whole building, nobody knows about it.' },
+    ]},
+    { id:'study6', name:'Moore School — Dominion Energy Study Commons & Patio', ref:'CC-STUDY-06', note:'Floor-to-ceiling windows and city views inside; outdoor patio tables if you want street noise instead.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+    { id:'study7', name:'Colloquium Café — Upstairs', ref:'CC-STUDY-07', note:'Starbucks and real study space on either side of the upstairs.', stars:4, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study8', name:'Gambrell Hall — 3rd Floor Balcony', ref:'CC-STUDY-08', note:'Open-air concrete deck with Capstone views — great for groups, weather permitting.', stars:4, photoHues:['#4A0007','#8a3a44'], comments:[] },
+    { id:'study9', name:'The Horseshoe', ref:'CC-STUDY-09', note:'The quintessential UofSC study spot — grab a blanket and claim some grass.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[
+      { user:'carolina_eats', text:'Bring a blanket, always someone with a dog out here too.' },
+    ]},
+    { id:'study10', name:'Gibbes Green', ref:'CC-STUDY-10', note:'A shaded, wooded oasis behind the historic buildings — centrally located, oak canopy overhead. Grab an acai bowl from Colloquium and make it a picnic.', stars:4, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study11', name:'South Caroliniana Library', ref:'CC-STUDY-11', note:'Recently renovated, whisper-quiet, original 1844 desks. No food or drinks inside, but Cool Beans is a short walk away.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+    { id:'study12', name:'Swearingen Reading Room', ref:'CC-STUDY-12', note:'A strictly enforced silent reading room — good for locking in.', stars:4, photoHues:['#4A0007','#8a3a44'], comments:[] },
+    { id:'study13', name:'Patio at Barnwell College', ref:'CC-STUDY-13', note:'A shady outdoor gem — same vibe as Gibbes Green but with real tables, big enough for the whole group.', stars:4, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study14', name:'Russell House — 3rd Floor', ref:'CC-STUDY-14', note:'Removed from the chaos downstairs — cozy chairs and couches tucked into corners, still close to your favorite dining spot.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+    { id:'study15', name:'Music Library', ref:'CC-STUDY-15', note:'Inside the School of Music — underrated, ultra-quiet, almost never crowded.', stars:4, photoHues:['#4A0007','#8a3a44'], comments:[] },
+    { id:'study16', name:'Law Library', ref:'CC-STUDY-16', note:'Massive and bright, on the northeast side of campus — built for long, uninterrupted reading sessions.', stars:5, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study17', name:'McKissick Museum / Library', ref:'CC-STUDY-17', note:'Old-school desks tucked at the top of the Horseshoe — quiet and easy to overlook.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+    { id:'study18', name:'Science and Technology Building Lounges', ref:'CC-STUDY-18', note:'Near the Honors Residence Hall — four floors of sleek, modern indoor lounge space.', stars:4, photoHues:['#4A0007','#8a3a44'], comments:[] },
+    { id:'study19', name:'Petigru (College of Arts & Sciences)', ref:'CC-STUDY-19', note:'Open classrooms and designated study rooms with plenty of whiteboard space.', stars:4, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study20', name:'Gambrell Hall — Basement Computer Lab', ref:'CC-STUDY-20', note:'A quiet basement lab with scattered empty alcoves — different scene from the 3rd floor balcony.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+    { id:'study21', name:'School of Journalism Rooftop Patio', ref:'CC-STUDY-21', note:'High-altitude, modern seating with a sweeping view of the city streets below.', stars:5, photoHues:['#4A0007','#8a3a44'], comments:[] },
+    { id:'study22', name:'Currell College Courtyard', ref:'CC-STUDY-22', note:'Shaded grassy courtyard with table setups — good tree spacing if you want to hang a hammock.', stars:4, photoHues:['#73000A','#a33a44'], comments:[] },
+    { id:'study23', name:'Cool Beans Coffee', ref:'CC-STUDY-23', note:'Just off campus, right across from the Horseshoe — cozy, multi-level, the unofficial 24th study spot.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
+  ];
+  /* ---------- EVENTS ---------- */
+  // Campus events with RSVP. Seed events have fake 'creator' info baked in; events a user
+  // creates pull the real name/photo from whatever's currently saved on the Profile page.
+  const events = [
+    { id:'evt1', title:'CS Club Hackathon', tag:'Club', month:'AUG', day:'22', time:'6:00 PM', location:'Close-Hipp, Room 201', desc:'Overnight build event, teams of up to 4. Pizza and energy drinks provided. All majors welcome.', going:14, creator:{ name:'CS Club', handle:'@cs_club', avatar:'CC' } },
+    { id:'evt2', title:'Gamecocks vs. Clemson — Watch Party', tag:'Athletics', month:'AUG', day:'28', time:'7:30 PM', location:'The Spur, Campus Village', desc:'Big screens, garnet face paint, free wings for the first 50 people.', going:62, creator:{ name:'The Spur', handle:'@thespur', avatar:'TS' } },
+    { id:'evt3', title:'Preston College Floor Meeting', tag:'Dorm', month:'AUG', day:'19', time:'7:00 PM', location:'Preston College Lounge', desc:'Mandatory floor meeting — RA will cover quiet hours, safety walkthrough, and a floor social right after.', going:22, creator:{ name:'RA Maya', handle:'@ra_maya', avatar:'RM' } },
+    { id:'evt4', title:'Involvement Fair', tag:'Campus-Wide', month:'AUG', day:'25', time:'11:00 AM', location:'Greene Street', desc:'200+ student orgs tabling. Free swag, free food trucks, sign up for whatever looks fun.', going:140, creator:{ name:'Student Life', handle:'@uofsc_life', avatar:'SL' } },
+    { id:'evt5', title:'Accessibility Advocates — Info Session', tag:'Club', month:'AUG', day:'30', time:'5:30 PM', location:'Russell House, Room 315', desc:'Learn how to get involved improving campus accessibility. New members welcome, no experience needed.', going:8, creator:{ name:'Tyler Park', handle:'@t_park', avatar:'TP' } },
+  ];
+  const rsvpStatus = {};
+
+  function renderEvents(){
+    document.getElementById('eventsList').innerHTML = events.map(e => {
+      const isGoing = !!rsvpStatus[e.id];
+      const count = e.going + (isGoing ? 1 : 0);
+      return `
+      <div class="event-card">
+        <div class="event-date-block"><div class="month">${e.month}</div><div class="day">${e.day}</div></div>
+        <div class="event-body">
+          <span class="event-tag" style="${tagPillStyle(e.tag === 'Athletics' ? 'Dining' : e.tag === 'Club' ? 'Study Spot' : e.tag === 'Dorm' ? 'Tip' : 'Accessibility')}">${e.tag.toUpperCase()}</span>
+          <div class="event-title">${e.title}</div>
+          <div class="event-meta">${e.time} · ${e.location}</div>
+          <div class="event-desc">${e.desc}</div>
+          <div class="event-creator">
+            <span class="event-creator-avatar">${e.creator.avatarImg ? `<img src="${e.creator.avatarImg}" alt="${e.creator.name}">` : e.creator.avatar}</span>
+            <span>Hosted by <strong>${e.creator.name}</strong> ${e.creator.handle}</span>
+          </div>
+          <div class="event-footer">
+            <button class="rsvp-btn ${isGoing ? 'going' : ''}" onclick="toggleRsvp('${e.id}')">${isGoing ? "✓ You're going" : "I'm going"}</button>
+            <span class="event-count">${count} going</span>
+          </div>
+        </div>
+      </div>
+    `;
+    }).join('');
+  }
+
+  function toggleRsvp(id){
+    rsvpStatus[id] = !rsvpStatus[id];
+    renderEvents();
+    renderMyEvents();
+  }
+
+  function renderMyEvents(){
+    const el = document.getElementById('myEventsList');
+    if(!el) return;
+    const going = events.filter(e => rsvpStatus[e.id]);
+    if(going.length === 0){
+      el.innerHTML = '<div class="wall-empty">No RSVPs yet — head to the Events tab and find something to go to.</div>';
+      return;
+    }
+    el.innerHTML = going.map(e => `
+      <div class="note" style="margin-bottom:14px;">
+        <span class="note-tag" style="${tagPillStyle(e.tag === 'Athletics' ? 'Dining' : e.tag === 'Club' ? 'Study Spot' : e.tag === 'Dorm' ? 'Tip' : 'Accessibility')}">${e.tag.toUpperCase()}</span>
+        <h3>${e.title}</h3>
+        <p>${e.month} ${e.day} · ${e.time} · ${e.location}</p>
+      </div>
+    `).join('');
+  }
+
+  function getCurrentUserInfo(){
+    const name = document.getElementById('fieldName')?.value.trim() || 'Gamecock Student';
+    const username = document.getElementById('fieldUsername')?.value.trim() || '@newtocampus';
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || 'GS';
+    const avatarImg = document.querySelector('#avatarBig img');
+    return { name, handle: username, avatar: initials, avatarImg: avatarImg ? avatarImg.src : null };
+  }
+
+  let nextEventId = 6;
+  function openCreateEventModal(){
+    document.getElementById('newEventTitle').value = '';
+    document.getElementById('newEventMonth').value = '';
+    document.getElementById('newEventDay').value = '';
+    document.getElementById('newEventTime').value = '';
+    document.getElementById('newEventLocation').value = '';
+    document.getElementById('newEventDesc').value = '';
+    document.getElementById('createEventError').style.display = 'none';
+    document.getElementById('createEventModalOverlay').classList.add('show');
+  }
+  function closeCreateEventModal(){
+    document.getElementById('createEventModalOverlay').classList.remove('show');
+  }
+  function submitCreateEvent(){
+    const title = document.getElementById('newEventTitle').value.trim();
+    const month = document.getElementById('newEventMonth').value.trim().toUpperCase() || 'TBD';
+    const day = document.getElementById('newEventDay').value.trim() || '—';
+    const time = document.getElementById('newEventTime').value.trim() || 'TBD';
+    const location = document.getElementById('newEventLocation').value.trim() || 'TBD';
+    const tag = document.getElementById('newEventTag').value;
+    const desc = document.getElementById('newEventDesc').value.trim();
+    const errorEl = document.getElementById('createEventError');
+
+    if(!title){
+      errorEl.textContent = 'Give your event a title.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if(isFlaggedText(title) || isFlaggedText(desc)){
+      errorEl.textContent = 'That title or description was blocked by the content filter.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    const user = getCurrentUserInfo();
+    events.unshift({
+      id: 'evt' + (nextEventId++), title, tag, month, day, time, location, desc, going: 0,
+      creator: { name: user.name, handle: user.handle, avatar: user.avatar, avatarImg: user.avatarImg },
+    });
+    closeCreateEventModal();
+    renderEvents();
+  }
+
+  const diningSpots = [
+    // Dining Halls
+    { id:'dine1', name:"Fresh Greene's", ref:'CC-DINE-01', area:'Dining Halls', note:'All-you-care-to-eat, built around fresh, healthy, local ingredients.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./fresh-greenes.jpg', comments:[] },
+    { id:'dine2', name:'Garnet Station', ref:'CC-DINE-02', area:'Dining Halls', note:'All-you-care-to-eat on the first floor of Russell House.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhotos:['./garnet-station-1.jpg','./garnet-station-2.jpg'], comments:[] },
+    { id:'dine3', name:'Gibbes Court Bistro', ref:'CC-DINE-03', area:'Dining Halls', note:'All-you-care-to-eat — the grill is always running here.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhotos:['./gibbes-1.jpg','./gibbes-2.jpg'], comments:[] },
+    { id:'dine4', name:'Honeycomb Café', ref:'CC-DINE-04', area:'Dining Halls', note:'All-you-care-to-eat, focused on sustainably sourced food.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./honeycomb.jpg', comments:[] },
+    { id:'dine5', name:'The Community Table', ref:'CC-DINE-05', area:'Dining Halls', note:'All-you-care-to-eat, leans into classic American comfort food.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./community-table.jpg', comments:[] },
+    { id:'dine6', name:'The Pavilion at Campus Village', ref:'CC-DINE-06', area:'Dining Halls', note:'All-you-care-to-eat hall in the newer Campus Village neighborhood.', stars:5, photoHues:['#4A0007','#8a3a44'], realPhotos:['./pavilion-1.jpg','./pavilion-2.jpg'], comments:[
+      { user:'carolina_eats', text:'Newest hall on campus, way less crowded than Russell House.' },
+    ]},
+    // Russell House — 1st Floor
+    { id:'dine7', name:'Chick-fil-A (Russell House)', ref:'CC-DINE-07', area:'Russell House · 1st Floor', note:'Chicken sandwich and waffle fries — expect a line at lunch.', stars:5, photoHues:['#73000A','#a33a44'], realPhoto:'./chickfila.jpg', comments:[] },
+    { id:'dine24', name:'Panera Bread', ref:'CC-DINE-24', area:'Russell House · 1st Floor', note:'Sandwiches, salads, and soup — a reliable sit-down option.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./panera.jpg', comments:[] },
+    { id:'dine8', name:'Panda Express', ref:'CC-DINE-08', area:'Russell House · 1st Floor', note:'Fast-casual American Chinese, quick between classes.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./panda-express.jpg', comments:[] },
+    { id:'dine9', name:'Qdoba', ref:'CC-DINE-09', area:'Russell House · 1st Floor', note:'Build-your-own Mexican-inspired bowls and burritos.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./qdoba.jpg', comments:[] },
+    { id:'dine10', name:'The Halal Shack', ref:'CC-DINE-10', area:'Russell House · 1st Floor', note:'Halal-certified Middle Eastern street food.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./halal-shack.jpg', comments:[] },
+    { id:'dine26', name:'Cola City Yogurt', ref:'CC-DINE-26', area:'Russell House · 1st Floor', note:'Frozen yogurt and toppings — a sweet study break.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./cola-city-yogurt.jpg', comments:[] },
+    { id:'dine27', name:'Gamecock General (Russell House)', ref:'CC-DINE-27', area:'Russell House · 1st Floor', note:'Grab-and-go convenience items for busy students.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./gamecock-general-rh.jpg', comments:[] },
+    // Russell House — 2nd Floor
+    { id:'dine11', name:'Einstein Bros. Bagels', ref:'CC-DINE-11', area:'Russell House · 2nd Floor', note:'Russell House, 2nd floor, next to Gamecock Park. Best around 1pm — closes at 2pm and most students skip bagels that late.', stars:5, photoHues:['#73000A','#a33a44'], realPhotos:['./einstein-bros.jpg','./gamecock-park.jpg'], comments:[
+      { user:'sophomore_sam', text:'Game changer for morning coffee runs.' },
+      { user:'carolina_eats', text:'Confirmed — 1pm is basically empty, closes at 2 though so do not cut it close.' },
+    ]},
+    { id:'dine12', name:'Congaree Craft Pizza and Pasta', ref:'CC-DINE-12', area:'Russell House · 2nd Floor', note:'Made-to-order pizza and pasta, cooked fresh per order.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./congaree-pizza.jpg', comments:[] },
+    { id:'dine13', name:"Callie's Hot Little Biscuit", ref:'CC-DINE-13', area:'Russell House · 2nd Floor', note:'Handmade biscuits, biscuit sandwiches, and iced coffee — founded by USC alum Carrie Morey.', stars:5, photoHues:['#4A0007','#8a3a44'], realPhotos:['./callies-1.jpg','./callies-2.jpg'], hours:'Mon–Thu: 8am–6pm\nFri: 8am–3pm\nSat: Closed\nSun: 12pm–6pm', menu:[
+      { item:'Fried Chicken Biscuit', price:'$13.95' },
+      { item:'Bacon, Egg, Cheese Biscuit', price:'$8.95' },
+      { item:'Pimento Cheese Biscuit', price:'$7.95' },
+      { item:'Biscuits with Sausage Gravy', price:'$8.95' },
+      { item:'Grit Biscuit Bowl', price:'$5.50' },
+    ], comments:[
+      { user:'junior_jess', text:'Get there early, the biscuits sell out some mornings.' },
+    ]},
+    { id:'dine14', name:'Union Grill', ref:'CC-DINE-14', area:'Russell House · 2nd Floor', note:'Burgers and all-day breakfast, classic American comfort food.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./union-grill.jpg', comments:[] },
+    // Campus Village
+    { id:'dine15', name:'The Spur', ref:'CC-DINE-15', area:'Campus Village', note:'On-campus spot built for watching Gamecock games with friends.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./the-spur.jpg', comments:[] },
+    { id:'dine16', name:'Starbucks (Campus Village)', ref:'CC-DINE-16', area:'Campus Village', note:'Full-service Starbucks, seasonal drinks included.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./starbucks-cv.jpg', comments:[] },
+    { id:'dine30', name:'Gamecock General (Campus Village)', ref:'CC-DINE-30', area:'Campus Village', note:'Convenience items plus a late-night ghost kitchen.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./gamecock-general-cv.jpg', comments:[] },
+    { id:'dine25', name:'Blenz Smoothie Bowls', ref:'CC-DINE-25', area:'Russell House · 2nd Floor', note:'Acai and pitaya smoothie bowls, made to order.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./blenz.jpg', comments:[] },
+    { id:'dine28', name:'Food Lab', ref:'CC-DINE-28', area:'Russell House · 2nd Floor', note:'Rotating dining concepts, always something new to try.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./food-lab.jpg', comments:[] },
+    { id:'dine29', name:'Crust & Leaf', ref:'CC-DINE-29', area:'Russell House · 2nd Floor', note:'Specialty sandwiches and salads, made fresh.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./crust-leaf.jpg', comments:[] },
+    // East Campus
+    { id:'dine17', name:"Groucho's Deli", ref:'CC-DINE-17', area:'East Campus', note:'Columbia sandwich staple, known for the 45 Sauce.', stars:5, photoHues:['#73000A','#a33a44'], hours:'Mon–Fri: 10:30am–8pm\nSat–Sun: 12pm–8pm', menu:[
+      { item:'STP Dipper', price:'$10.19' },
+      { item:'Bacon & Turkey Club', price:'$10.99' },
+      { item:"Groucho's BLT", price:'$9.49' },
+      { item:'Chicken Power Salad', price:'$10.99' },
+      { item:'Turkey Sandwich', price:'$8.29' },
+    ], comments:[] },
+    { id:'dine31', name:'Colloquium Café', ref:'CC-DINE-31', area:'East Campus', note:'Cozy café with plenty of outdoor seating under the oaks.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./colloquium-cafe.jpg', comments:[] },
+    { id:'dine18', name:'Starbucks (Welsh Humanities)', ref:'CC-DINE-18', area:'East Campus', note:'Full-service Starbucks tucked into the humanities building.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./starbucks-welsh.jpg', comments:[] },
+    { id:'dine32', name:'Top of Carolina', ref:'CC-DINE-32', area:'East Campus', note:"Columbia's only rotating restaurant experience, at the Capstone.", stars:5, photoHues:['#4A0007','#8a3a44'], realPhoto:'./top-of-carolina.jpg', comments:[] },
+    { id:'dine33', name:'Village Juice & Kitchen', ref:'CC-DINE-33', area:'East Campus', note:'Fresh bowls, salads, and smoothies near Close-Hipp.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./village-juice.jpg', comments:[] },
+    // West Campus
+    { id:'dine19', name:'Starbucks (Thomas Cooper Library)', ref:'CC-DINE-19', area:'West Campus', note:'The easiest caffeine stop for a late library session.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./starbucks-cooper.jpg', hours:'Mon–Thu: 7:30am–11pm\nFri: 7:30am–6pm\nSat: 11am–4pm\nSun: 11am–11pm', comments:[] },
+    { id:'dine20', name:'Global Café', ref:'CC-DINE-20', area:'West Campus', note:'Internationally-inspired entrées alongside locally-sourced burgers.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./global-cafe.jpg', hours:'Mon–Thu: 7:30am–5pm\nFri: 7:30am–2:30pm\nSat–Sun: Closed', menu:[
+      { item:'Local Grassfed Angus Cheeseburger', price:'$10.89' },
+      { item:'Chicken Tinga Quesadilla', price:'$11.29' },
+      { item:'Crispy Buffalo Chicken Sandwich', price:'$10.69' },
+      { item:'Bacon & Egg Breakfast Burrito', price:'$5.69' },
+      { item:'Allo Allo — Build Your Own Bowl', price:'$10.49' },
+    ], comments:[] },
+    // South Campus
+    { id:'dine21', name:'Café Verde', ref:'CC-DINE-21', area:'South Campus', note:'Gourmet burgers, fries, and signature sandwiches.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./cafe-verde.jpg', hours:'Mon–Thu: 11am–12am\nFri: Closed\nSat: 5pm–12am\nSun: 12pm–12am', menu:[
+      { item:'Burger + Cheese Combo', price:'$8.99' },
+      { item:'Burger + Bacon + Cheese Combo', price:'$9.59' },
+      { item:'Grilled Chicken + Bacon Combo', price:'$9.59' },
+      { item:'The Kitchen Sink (14")', price:'$12.79' },
+      { item:'Sweet Potato Fries', price:'$2.39' },
+    ], comments:[] },
+    // North Campus
+    { id:'dine41', name:'Chick-fil-A (Gateway 737)', ref:'CC-DINE-41', area:'West Campus', note:'Chicken sandwich and waffle fries, now at Gateway 737.', stars:5, photoHues:['#73000A','#a33a44'], realPhoto:'./chickfila-gateway.jpg', hours:'Mon–Fri: 8am–10pm\nSat: 8:30am–10pm\nSun: Closed', comments:[] },
+    { id:'dine42', name:"Dunkin' Donuts", ref:'CC-DINE-42', area:'West Campus', note:'The national chain, tucked into the Science and Technology Building.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./dunkin-donuts.jpg', comments:[] },
+    { id:'dine36', name:'Gamecock General (Community Table)', ref:'CC-DINE-36', area:'West Campus', note:'Convenience store plus a late-night ghost kitchen — order the Ghost Kitchen menu via Grubhub.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./gamecock-general-ct.jpg', hours:'Gamecock General — Mon–Fri: 11am–12am, Sat: Closed, Sun: 11am–12am\nGhost Kitchen — Sun–Thu: 8pm–12am, Fri: 2:30pm–12am, Sat: Closed', menu:[
+      { item:'Original Chicken Tenders (3pc) Combo', price:'$10.79' },
+      { item:'Chipotle Honey Tenders (5pc) Combo', price:'$14.29' },
+      { item:'Teriyaki Chicken Fried Rice Bowl', price:'$12.99' },
+      { item:'Ginger & Chicken Potstickers (5)', price:'$6.99' },
+    ], comments:[] },
+    { id:'dine37', name:'Gamecock General (Park Place)', ref:'CC-DINE-37', area:'West Campus', note:'Convenience store for Park Place Apartments residents.', stars:4, photoHues:['#73000A','#a33a44'], hours:'Mon–Sun: 6pm–11pm', comments:[] },
+    { id:'dine38', name:'The Golden Spur Grill', ref:'CC-DINE-38', area:'West Campus', note:'Brunch, lunch, and dinner across from Colonial Life Arena — reservations via their own site.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./golden-spur-grill.jpg', hours:'Sun–Fri: 11am–8:30pm\nSat: Closed', comments:[] },
+    { id:'dine39', name:'Gamecock General (Honors)', ref:'CC-DINE-39', area:'West Campus', note:'Convenience store in the Honors Residence Hall. Coming Fall 2026.', stars:0, photoHues:['#4A0007','#8a3a44'], comments:[] },
+    { id:'dine40', name:'Gamecock General (Coker Life Sciences)', ref:'CC-DINE-40', area:'West Campus', note:'Snacks and grab-and-go meals for busy students.', stars:4, photoHues:['#73000A','#a33a44'], realPhoto:'./gamecock-general-coker.jpg', comments:[] },
+    { id:'dine34', name:'The Wired Café', ref:'CC-DINE-34', area:'South Campus', note:'Coffee, sandwiches, salads, and grab-and-go, inside Swearingen Engineering Center.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], realPhoto:'./wired-cafe.jpg', hours:'Mon–Thu: 8am–4:30pm\nFri: 8am–2:30pm\nSat–Sun: Closed', menu:[
+      { item:'Bacon, Egg & Cheese Sandwich', price:'$6.49' },
+      { item:'The Wyle E. Coyote (chicken, bacon)', price:'$9.29' },
+      { item:'BBQ Chicken Flatbread', price:'$10.75' },
+      { item:'Chicken Caesar Salad', price:'$10.75' },
+    ], comments:[] },
+    { id:'dine22', name:'Hampton St. Café', ref:'CC-DINE-22', area:'North Campus', note:'Coffee, baked goods, sandwiches, salads, and flatbreads.', stars:4, photoHues:['#4A0007','#8a3a44'], realPhoto:'./hampton-cafe.jpg', comments:[] },
+    { id:'dine35', name:"Counselor's Café", ref:'CC-DINE-35', area:'North Campus', note:'Entrées and sides for a quick bite near the law school.', stars:4, photoHues:['#73000A','#a33a44'], comments:[] },
+    // Food Trucks
+    { id:'dine23', name:'Breakfast Jawn', ref:'CC-DINE-23', area:'Food Trucks', note:'Breakfast grill run by three USC students — a campus favorite.', stars:5, photoHues:['#73000A','#a33a44'], realPhoto:'./breakfast-jawn.jpg', comments:[
+      { user:'night_owl', text:'Best breakfast sandwich on campus, hands down.' },
+    ]},
+  ];
+  function starString(n){ return '★'.repeat(n) + '☆'.repeat(5-n); }
+
+  /* ---------- SAVED SPOTS ---------- */
+  // Bookmarking for Study Spots/Dining, tied to the Profile page's saved list and live count.
+  const savedSpots = {};
+  function toggleSaveSpot(id, event){
+    if(event) event.stopPropagation();
+    savedSpots[id] = !savedSpots[id];
+    renderStudyGrid();
+    renderDiningGrid();
+    updateSavedUI();
+  }
+  function updateSavedUI(){
+    const ids = Object.keys(savedSpots).filter(id => savedSpots[id]);
+    const countEl = document.getElementById('savedCount');
+    if(countEl) countEl.textContent = ids.length;
+    const listEl = document.getElementById('savedSpotsList');
+    if(listEl){
+      if(ids.length === 0){
+        listEl.innerHTML = '<div class="wall-empty">No saved spots yet — tap the bookmark on any Study Spot or Dining card.</div>';
+      } else {
+        listEl.innerHTML = ids.map(id => {
+          const spot = allSpots.find(s => s.id === id);
+          return spot ? `<div class="comment" style="cursor:pointer;" onclick="openSpotDetail('${id}')"><strong>★ ${spot.name}</strong> — ${spot.note}</div>` : '';
+        }).join('');
+      }
+    }
+  }
+
+  /* ---------- BUSY / QUIET INDICATOR ---------- */
+  // Not real foot-traffic data. This is a time-of-day heuristic (rush hours for dining,
+  // study hours for libraries) that approximates how busy a spot usually is.
+  function computeBusyLevel(isDining){
+    const hour = new Date().getHours();
+    let level;
+    if(isDining){
+      if((hour >= 7 && hour < 9) || (hour >= 12 && hour < 13) || (hour >= 18 && hour < 20)) level = 'busy';
+      else if((hour >= 9 && hour < 12) || (hour >= 13 && hour < 18) || (hour >= 20 && hour < 21)) level = 'moderate';
+      else level = 'quiet';
+    } else {
+      if((hour >= 19 && hour < 23) || (hour >= 12 && hour < 14)) level = 'busy';
+      else if((hour >= 9 && hour < 12) || (hour >= 14 && hour < 19)) level = 'moderate';
+      else level = 'quiet';
+    }
+    const meta = {
+      quiet: { label:'Quiet', fill:'33%' },
+      moderate: { label:'Moderate', fill:'66%' },
+      busy: { label:'Busy right now', fill:'100%' },
+    };
+    return { level, ...meta[level] };
+  }
+
+  function spotCardHtml(s, isDining){
+    const saved = !!savedSpots[s.id];
+    const busy = computeBusyLevel(isDining);
+    return `
+      <div class="card" onclick="openSpotDetail('${s.id}')">
+        <div class="card-top">
+          <span class="ref mono">REF/${s.ref}</span>
+          <button class="save-btn-icon ${saved ? 'saved' : ''}" onclick="toggleSaveSpot('${s.id}', event)" title="Save this spot">${saved ? '★' : '☆'}</button>
+        </div>
+        <div class="card-body">
+          <h3>${s.name}</h3><p>${s.note}</p><div class="stars">${starString(Math.round(s.stars))}</div>
+          <div class="busy-row">
+            <div class="busy-bar"><div class="busy-fill busy-${busy.level}" style="width:${busy.fill};"></div></div>
+            <span class="busy-label">${busy.label}</span>
+          </div>
+          <div class="card-hint"><span>${s.comments.length} comments</span><span>View photos →</span></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderGrid(id, data){
+    document.getElementById(id).innerHTML = data.map(s => spotCardHtml(s, id === 'diningGrid')).join('');
+  }
+
+  const DINING_PER_PAGE = 6;
+  let currentDiningPage = 0;
+  let diningSearchQuery = '';
+
+  function renderDiningGrid(){
+    const q = diningSearchQuery.trim().toLowerCase();
+    const filtered = q
+      ? diningSpots.filter(s => s.name.toLowerCase().includes(q) || s.note.toLowerCase().includes(q) || s.area.toLowerCase().includes(q))
+      : diningSpots;
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / DINING_PER_PAGE));
+    if(currentDiningPage >= totalPages) currentDiningPage = totalPages - 1;
+    if(currentDiningPage < 0) currentDiningPage = 0;
+    const start = currentDiningPage * DINING_PER_PAGE;
+    const pageItems = filtered.slice(start, start + DINING_PER_PAGE);
+
+    const grid = document.getElementById('diningGrid');
+    if(pageItems.length === 0){
+      grid.innerHTML = '<div class="wall-empty">No dining spots match that search.</div>';
+    } else {
+      grid.innerHTML = pageItems.map(s => spotCardHtml(s, true)).join('');
+    }
+
+    const leftArrow = document.getElementById('diningArrowLeft');
+    const rightArrow = document.getElementById('diningArrowRight');
+    if(leftArrow) leftArrow.disabled = currentDiningPage === 0;
+    if(rightArrow) rightArrow.disabled = currentDiningPage >= totalPages - 1;
+
+    const dots = document.getElementById('diningPageDots');
+    if(dots){
+      dots.innerHTML = Array.from({length: totalPages}).map((_, i) =>
+        `<span class="${i === currentDiningPage ? 'active' : ''}"></span>`
+      ).join('');
+    }
+  }
+
+  function pageDining(direction){
+    currentDiningPage += direction;
+    renderDiningGrid();
+  }
+
+  const STUDY_PER_PAGE = 6;
+  let currentStudyPage = 0;
+  let studySearchQuery = '';
+
+  function renderStudyGrid(){
+    const q = studySearchQuery.trim().toLowerCase();
+    const filtered = q
+      ? studySpots.filter(s => s.name.toLowerCase().includes(q) || s.note.toLowerCase().includes(q))
+      : studySpots;
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / STUDY_PER_PAGE));
+    if(currentStudyPage >= totalPages) currentStudyPage = totalPages - 1;
+    if(currentStudyPage < 0) currentStudyPage = 0;
+    const start = currentStudyPage * STUDY_PER_PAGE;
+    const pageItems = filtered.slice(start, start + STUDY_PER_PAGE);
+
+    const grid = document.getElementById('studyGrid');
+    if(pageItems.length === 0){
+      grid.innerHTML = '<div class="wall-empty">No study spots match that search.</div>';
+    } else {
+      grid.innerHTML = pageItems.map(s => spotCardHtml(s, false)).join('');
+    }
+
+    const leftArrow = document.getElementById('studyArrowLeft');
+    const rightArrow = document.getElementById('studyArrowRight');
+    if(leftArrow) leftArrow.disabled = currentStudyPage === 0;
+    if(rightArrow) rightArrow.disabled = currentStudyPage >= totalPages - 1;
+
+    const dots = document.getElementById('studyPageDots');
+    if(dots){
+      dots.innerHTML = Array.from({length: totalPages}).map((_, i) =>
+        `<span class="${i === currentStudyPage ? 'active' : ''}"></span>`
+      ).join('');
+    }
+  }
+
+  function pageStudy(direction){
+    currentStudyPage += direction;
+    renderStudyGrid();
+  }
+
+  function filterStudySpots(query){
+    studySearchQuery = query;
+    currentStudyPage = 0;
+    renderStudyGrid();
+  }
+
+  function filterDiningSpots(query){
+    diningSearchQuery = query;
+    currentDiningPage = 0;
+    renderDiningGrid();
+  }
+
+  /* ---------- SPOT DETAIL MODAL (photos, video, comments) ---------- */
+  // The big modal that powers every Study Spot/Dining card: photo gallery, hours/menu,
+  // video placeholder, comments, and (further down) the interactive star rating.
+  const allSpots = [...studySpots, ...diningSpots];
+  let activeSpot = null;
+
+  function openSpotDetail(id){
+    activeSpot = allSpots.find(s => s.id === id);
+    renderSpotModal();
+    document.getElementById('spotModalOverlay').classList.add('show');
+  }
+  function closeSpotDetail(){
+    document.getElementById('spotModalOverlay').classList.remove('show');
+  }
+
+  function getSpotPhotos(s){
+    if(!s.photos){
+      s.photos = [];
+      const reals = s.realPhotos || (s.realPhoto ? [s.realPhoto] : []);
+      reals.forEach(src => s.photos.push({ type:'image', src }));
+      (s.photoHues || []).forEach(hue => s.photos.push({ type:'hue', value:hue }));
+    }
+    if(!s.photoComments) s.photoComments = {};
+    return s.photos;
+  }
+
+  function renderSpotModal(){
+    const s = activeSpot;
+    const photos = getSpotPhotos(s);
+    const galleryItems = photos.map((p, i) => {
+      if(p.type === 'image'){
+        return `<div class="gallery-thumb" style="padding:0;" onclick="openPhotoLightbox(${i})" role="button" tabindex="0" aria-label="View photo ${i+1} of ${s.name}" onkeydown="if(event.key==='Enter')openPhotoLightbox(${i})"><img src="${p.src}" alt="${s.name}" style="width:100%;height:100%;object-fit:cover;"></div>`;
+      }
+      return `<div class="gallery-thumb" style="background:linear-gradient(135deg, ${p.value}, ${p.value}cc);" onclick="openPhotoLightbox(${i})" role="button" tabindex="0" aria-label="View photo ${i+1}" onkeydown="if(event.key==='Enter')openPhotoLightbox(${i})"><span class="gallery-label mono">Photo ${i+1}</span></div>`;
+    }).join('');
+
+    const ratingCount = s.ratingCount || 10;
+    const userStarsGiven = userRatings[s.id] || 0;
+    const isDiningSpot = diningSpots.includes(s);
+    const busy = computeBusyLevel(isDiningSpot);
+    const saved = !!savedSpots[s.id];
+
+    document.getElementById('spotModalBody').innerHTML = `
+      <div class="spot-modal-head">
+        <div>
+          <span class="ref mono" style="color:var(--gray);">REF/${s.ref}</span>
+          <h2 style="font-size:22px;margin:4px 0 6px;">${s.name}</h2>
+          <div class="stars">${starString(Math.round(s.stars))}</div>
+          <div class="rate-row mono">
+            ${[1,2,3,4,5].map(n => `<span class="rate-star ${n <= userStarsGiven ? 'active' : ''}" onclick="rateSpot('${s.id}', ${n})" role="button" tabindex="0" aria-label="Rate ${n} star${n > 1 ? 's' : ''}" onkeydown="if(event.key==='Enter')rateSpot('${s.id}', ${n})">★</span>`).join('')}
+            <span class="rate-label">${userStarsGiven ? 'you rated this ' + userStarsGiven : 'rate this spot'}</span>
+          </div>
+          <div class="busy-row" style="margin-top:10px;max-width:220px;">
+            <div class="busy-bar"><div class="busy-fill busy-${busy.level}" style="width:${busy.fill};"></div></div>
+            <span class="busy-label">${busy.label}</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;">
+          <button class="modal-close" onclick="closeSpotDetail()" aria-label="Close">✕</button>
+          <button class="save-btn-icon" style="position:static;background:${saved ? 'var(--garnet)' : 'var(--paper)'};color:${saved ? '#fff' : 'var(--garnet)'};" onclick="toggleSaveSpot('${s.id}', event); renderSpotModal();" title="Save this spot">${saved ? '★' : '☆'}</button>
+        </div>
+      </div>
+
+      <div class="gallery-row" id="galleryRow">${galleryItems}</div>
+      <div class="upload-row">
+        <input type="file" id="spotPhotoInput" accept="image/*" style="display:none" onchange="handleSpotPhoto(event)">
+        <button class="upload-btn" onclick="document.getElementById('spotPhotoInput').click()">+ Add your photo</button>
+        <span class="mod-note mono">No inappropriate photos — violators will be reported and reviewed.</span>
+      </div>
+
+      ${s.hours ? `<div class="hours-block"><span class="requests-head" style="margin-bottom:6px;display:block;">§ HOURS</span><p class="mono" style="font-size:12.5px;color:var(--gray);white-space:pre-line;">${s.hours}</p></div>` : ''}
+
+      ${s.menu ? `<div class="menu-block"><span class="requests-head" style="margin-bottom:8px;display:block;">§ MENU HIGHLIGHTS</span>
+        <div class="menu-list">
+          ${s.menu.map(item => `<div class="menu-item"><span>${item.item}</span><span class="menu-price mono">${item.price}</span></div>`).join('')}
+        </div>
+      </div>` : ''}
+
+      <div class="video-placeholder">
+        <div class="video-play">▶</div>
+        <span class="mono" style="font-size:11.5px;color:var(--gray);">Video walkthrough — community uploads coming soon</span>
+      </div>
+
+      <div class="spot-comments">
+        <div class="requests-head">§ COMMENTS (${s.comments.length})</div>
+        <div id="spotCommentList">${renderSpotComments(s)}</div>
+        <div class="comment-add" style="margin-top:10px;">
+          <input type="text" id="spotCommentInput" placeholder="Leave a comment...">
+          <input type="file" id="spotCommentPhotoInput" accept="image/*" style="display:none" onchange="handleCommentPhoto(event)">
+          <button onclick="document.getElementById('spotCommentPhotoInput').click()" title="Attach photo">📎</button>
+          <button onclick="addSpotComment()">Send</button>
+        </div>
+        <div id="commentPhotoPreview"></div>
+      </div>
+    `;
+  }
+
+  /* ---------- RATING ---------- */
+  // Weighted-average rating: assumes each spot already has ~10 ratings, then blends the
+  // user's new rating into that average. A real backend would just average real DB rows instead.
+  const userRatings = {};
+  function rateSpot(id, stars){
+    const s = allSpots.find(sp => sp.id === id);
+    const count = s.ratingCount || 10;
+    const previousUserRating = userRatings[id];
+    let totalPoints = s.stars * count;
+    if(previousUserRating){
+      totalPoints = totalPoints - previousUserRating + stars;
+    } else {
+      totalPoints = totalPoints + stars;
+      s.ratingCount = count + 1;
+    }
+    s.stars = totalPoints / s.ratingCount;
+    userRatings[id] = stars;
+    renderSpotModal();
+    renderStudyGrid();
+    renderDiningGrid();
+  }
+
+  /* ---------- PHOTO LIGHTBOX ---------- */
+  // Clicking any photo opens it full-size with its own separate comment thread, so a
+  // comment about a specific photo doesn't get mixed into the spot's general comments.
+  let activePhotoIndex = null;
+  function openPhotoLightbox(index){
+    activePhotoIndex = index;
+    renderPhotoLightbox();
+    document.getElementById('photoLightboxOverlay').classList.add('show');
+  }
+  function closePhotoLightbox(){
+    document.getElementById('photoLightboxOverlay').classList.remove('show');
+  }
+  function renderPhotoLightbox(){
+    const s = activeSpot;
+    const photos = getSpotPhotos(s);
+    const p = photos[activePhotoIndex];
+    const photoHtml = p.type === 'image'
+      ? `<img src="${p.src}" alt="${s.name}" style="width:100%;border-radius:8px;">`
+      : `<div style="width:100%;aspect-ratio:4/3;background:linear-gradient(135deg, ${p.value}, ${p.value}cc);border-radius:8px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.85);font-family:'IBM Plex Mono',monospace;">Photo ${activePhotoIndex + 1}</div>`;
+    const photoComments = s.photoComments[activePhotoIndex] || [];
+    document.getElementById('photoLightboxBody').innerHTML = `
+      <div class="spot-modal-head">
+        <span class="ref mono" style="color:var(--gray);">${s.name} — Photo ${activePhotoIndex + 1}</span>
+        <button class="modal-close" onclick="closePhotoLightbox()" aria-label="Close">✕</button>
+      </div>
+      ${photoHtml}
+      <div class="spot-comments" style="margin-top:16px;">
+        <div class="requests-head">§ COMMENTS ON THIS PHOTO (${photoComments.length})</div>
+        <div id="photoCommentList">${renderPhotoComments(photoComments)}</div>
+        <div class="comment-add" style="margin-top:10px;">
+          <input type="text" id="photoCommentInput" placeholder="Comment on this photo...">
+          <button onclick="addPhotoComment()">Send</button>
+        </div>
+      </div>
+    `;
+  }
+  function renderPhotoComments(list){
+    if(list.length === 0) return '<div class="wall-empty" style="margin-top:0;">No comments on this photo yet.</div>';
+    return list.map(c => `
+      <div class="comment">
+        <strong>@${c.user}:</strong> ${c.text}
+        <button class="report-link" onclick="openReportModal('@${c.user}')">Report</button>
+      </div>
+    `).join('');
+  }
+  function addPhotoComment(){
+    const input = document.getElementById('photoCommentInput');
+    const text = input.value.trim();
+    if(!text) return;
+    if(isFlaggedText(text)){
+      alert('That comment was blocked by the content filter. Please rephrase — no slurs, hate speech, or inappropriate content.');
+      return;
+    }
+    const s = activeSpot;
+    if(!s.photoComments[activePhotoIndex]) s.photoComments[activePhotoIndex] = [];
+    s.photoComments[activePhotoIndex].push({ user:'you', text });
+    input.value = '';
+    document.getElementById('photoCommentList').innerHTML = renderPhotoComments(s.photoComments[activePhotoIndex]);
+  }
+
+  function renderSpotComments(s){
+    if(s.comments.length === 0) return '<div class="wall-empty" style="margin-top:0;">No comments yet — be the first.</div>';
+    return s.comments.map(c => `
+      <div class="comment">
+        <strong>@${c.user}:</strong> ${c.text}
+        ${c.photo ? `<div class="comment-photo"><img src="${c.photo}" alt="attached photo"></div>` : ''}
+        <button class="report-link" onclick="openReportModal('@${c.user}')">Report</button>
+      </div>
+    `).join('');
+  }
+
+  let pendingCommentPhoto = null;
+  function handleCommentPhoto(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      pendingCommentPhoto = ev.target.result;
+      document.getElementById('commentPhotoPreview').innerHTML = `<div class="mono" style="font-size:11px;color:#4A0007;margin-top:6px;">✓ Photo attached — will post with your comment</div>`;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function addSpotComment(){
+    const input = document.getElementById('spotCommentInput');
+    const text = input.value.trim();
+    if(!text) return;
+    if(isFlaggedText(text)){
+      alert('That comment was blocked by the content filter. Please rephrase — no slurs, hate speech, or inappropriate content.');
+      return;
+    }
+    activeSpot.comments.push({ user:'you', text, photo: pendingCommentPhoto });
+    pendingCommentPhoto = null;
+    input.value = '';
+    document.getElementById('commentPhotoPreview').innerHTML = '';
+    document.getElementById('spotCommentList').innerHTML = renderSpotComments(activeSpot);
+  }
+
+  function handleSpotPhoto(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      getSpotPhotos(activeSpot).push({ type:'image', src: ev.target.result });
+      renderSpotModal();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /* ---------- REPORT SYSTEM ---------- */
+  // One generic report modal reused everywhere (comments, users, photos) via
+  // openReportModal(target). Ties into the enforcement ladder described on the Guidelines page.
+  let reportTarget = '';
+  let reportScreenshot = null;
+  function openReportModal(target){
+    reportTarget = target;
+    reportScreenshot = null;
+    document.getElementById('reportTargetName').textContent = target;
+    document.getElementById('reportReason').value = '';
+    document.getElementById('reportScreenshotPreview').innerHTML = '';
+    document.getElementById('reportConfirm').classList.remove('show');
+    document.getElementById('reportModalOverlay').classList.add('show');
+  }
+  function closeReportModal(){
+    document.getElementById('reportModalOverlay').classList.remove('show');
+  }
+  function handleReportScreenshot(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      reportScreenshot = ev.target.result;
+      document.getElementById('reportScreenshotPreview').innerHTML = `<img src="${ev.target.result}" alt="screenshot" style="max-width:100%;border:1px solid var(--line);margin-top:8px;">`;
+    };
+    reader.readAsDataURL(file);
+  }
+  function submitReport(){
+    const reason = document.getElementById('reportReason').value.trim();
+    if(!reason){ return; }
+    document.getElementById('reportConfirm').classList.add('show');
+    setTimeout(closeReportModal, 1800);
+  }
+
+
+
+  /* ---------- PROFILE ---------- */
+  // Profile editing (name/bio/photo) plus the 'My Activity' rollup: saved spots, RSVP'd
+  // events, and your own posts, all pulled into one place instead of scattered across tabs.
+  function handlePhoto(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      document.getElementById('avatarBig').innerHTML = `<img src="${ev.target.result}" alt="Profile photo">`;
+    };
+    reader.readAsDataURL(file);
+  }
+  function saveProfile(){
+    const note = document.getElementById('saveNote');
+    note.classList.add('show');
+    setTimeout(() => note.classList.remove('show'), 2500);
+  }
+
+  /* ---------- GROUPS (GroupMe-style) ---------- */
+  // GroupMe-style group chat. Groups are stored as an object keyed by id (not an array)
+  // so we can look a specific group's messages up directly instead of searching for it.
+  const groups = {
+    preston3: { name:'Preston 3rd Floor', meta:'42 members · Dorm', messages:[
+      { user:'RA Maya', text:'Floor meeting moved to 7pm tonight in the lounge!' },
+      { user:'devon', text:'is pizza still happening' },
+      { user:'RA Maya', text:'yes, dominos is ordered' },
+    ]},
+    csclub: { name:'CS Club', meta:'118 members · Club', messages:[
+      { user:'president_j', text:'Hackathon signups close Friday, link in bio' },
+      { user:'you', text:'is it teams of 4 or open?' },
+      { user:'president_j', text:'up to 4, solo is fine too' },
+    ]},
+    ravolunteer: { name:'RA Team — Greene St.', meta:'9 members · Staff', messages:[
+      { user:'coordinator', text:'Duty schedule for next week is posted' },
+      { user:'you', text:'got it, thanks' },
+    ]},
+    csce240: { name:'CSCE 240 Study Group', meta:'15 members · Class', messages:[
+      { user:'jordan', text:'anyone understand recursion problem 3' },
+      { user:'you', text:'i can walk through it tonight around 8' },
+    ]},
+  };
+  let activeGroup = 'preston3';
+
+  function renderGroupList(){
+    document.getElementById('groupList').innerHTML = Object.entries(groups).map(([key, g]) => `
+      <div class="group-item ${key === activeGroup ? 'active' : ''}" onclick="selectGroup('${key}')">
+        <div class="group-name">${g.name}</div>
+        <div class="group-meta">${g.meta}</div>
+      </div>
+    `).join('');
+  }
+
+  function selectGroup(key){
+    activeGroup = key;
+    renderGroupList();
+    renderGroupChat();
+  }
+
+  function renderGroupChat(){
+    const g = groups[activeGroup];
+    document.getElementById('groupChat').innerHTML = `
+      <div class="chat-header"><span class="live-dot"></span>${g.name}</div>
+      <div class="chat-messages" id="chatMessages">
+        ${g.messages.map(m => `
+          <div class="chat-msg ${m.user === 'you' ? 'me' : ''}">
+            ${m.user !== 'you' ? `<div class="chat-sender">${m.user}</div>` : ''}
+            <div class="chat-bubble">${m.text}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="groupChatInput" placeholder="Message ${g.name}...">
+        <button onclick="sendGroupMessage()">Send</button>
+      </div>
+    `;
+    const box = document.getElementById('chatMessages');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function sendGroupMessage(){
+    const input = document.getElementById('groupChatInput');
+    const text = input.value.trim();
+    if(!text) return;
+    if(isFlaggedText(text)){
+      alert('That message was blocked by the content filter. Please rephrase — no slurs, hate speech, or inappropriate content.');
+      return;
+    }
+    groups[activeGroup].messages.push({ user:'you', text });
+    input.value = '';
+    renderGroupChat();
+  }
+
+  function openCreateGroupModal(){
+    document.getElementById('newGroupName').value = '';
+    document.getElementById('newGroupDesc').value = '';
+    document.getElementById('createGroupError').style.display = 'none';
+    document.getElementById('createGroupModalOverlay').classList.add('show');
+  }
+  function closeCreateGroupModal(){
+    document.getElementById('createGroupModalOverlay').classList.remove('show');
+  }
+  function submitCreateGroup(){
+    const name = document.getElementById('newGroupName').value.trim();
+    const type = document.getElementById('newGroupType').value;
+    const desc = document.getElementById('newGroupDesc').value.trim();
+    const errorEl = document.getElementById('createGroupError');
+
+    if(!name){
+      errorEl.textContent = 'Give your group a name.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if(isFlaggedText(name) || isFlaggedText(desc)){
+      errorEl.textContent = 'That name or description was blocked by the content filter. No slurs, hate speech, or inappropriate content in group names.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    const key = 'g' + Date.now();
+    groups[key] = {
+      name: name,
+      meta: `1 member · ${type}`,
+      messages: desc ? [{ user:'you', text: desc }] : [],
+    };
+    closeCreateGroupModal();
+    selectGroup(key);
+  }
+
+  /* ---------- TRUST & SAFETY DEMO ----------
+     NOTE: this is a CLIENT-SIDE DEMO ONLY, built to show the concept.
+     Real moderation must run server-side — anyone can view this page's
+     source and see (or edit around) a client-side list. A production
+     version should call a maintained moderation service (e.g. a hate-speech/
+     profanity detection API) instead of a hardcoded word list, since hand-
+     maintained lists go stale and are trivially bypassed. This demo does
+     include real examples of racial slurs, homophobic/transphobic slurs,
+     and other slurs/derogatory terms so the concept can actually be tested,
+     plus basic normalization to catch spacing and leetspeak tricks. */
+  const flaggedTerms = [
+    'nigger','nigga','chink','gook','spic','wetback','beaner','coon','kike',
+    'towelhead','raghead','faggot','fag','tranny','dyke','retard','slut','whore',
+    'sex','nsfw','nude','porn',
+  ];
+
+  function normalizeForFilter(raw){
+    return raw
+      .toLowerCase()
+      .replace(/[0@]/g, 'o')
+      .replace(/[1!|]/g, 'i')
+      .replace(/[3€]/g, 'e')
+      .replace(/[4]/g, 'a')
+      .replace(/[5$]/g, 's')
+      .replace(/[7]/g, 't')
+      .replace(/[^a-z]/g, '')
+      .replace(/(.)\1{2,}/g, '$1');
+  }
+
+  function isFlaggedText(raw){
+    if(!raw) return false;
+    const normalized = normalizeForFilter(raw);
+    return flaggedTerms.some(w => normalized.includes(w));
+  }
+
+  function testFlag(){
+    const input = document.getElementById('demoFlagInput');
+    const raw = input.value.trim();
+    const result = document.getElementById('flagResult');
+    if(!raw){ return; }
+    const normalized = normalizeForFilter(raw);
+    const hit = flaggedTerms.some(w => normalized.includes(w));
+    if(hit){
+      result.innerHTML = `<div class="flag-result-box flagged">⚠ This would be flagged and removed. This is warning 1 of 3 before a 6-hour suspension.</div>`;
+    } else {
+      result.innerHTML = `<div class="flag-result-box clean">✓ Clean — this would post normally.</div>`;
+    }
+  }
+
+
+  /* ---------- MESSAGES (DMs) ---------- */
+  // 1:1 direct messages. Same rendering pattern as Groups below, just keyed by contact
+  // instead of by group id.
+  const dms = {
+    jess: { name:'Jess Reyes', handle:'@junior_jess', online:true, messages:[
+      { user:'jess', text:'hey are you going to the CS club meeting thursday?' },
+      { user:'you', text:'yeah planning on it, you?' },
+      { user:'jess', text:'same, see you there' },
+    ]},
+    sam: { name:'Sam Patel', handle:'@sophomore_sam', online:false, messages:[
+      { user:'sam', text:'thanks for the parking tip, saved me 15 minutes' },
+    ]},
+    maya: { name:'Maya Oduya', handle:'@carolina_eats', online:true, messages:[
+      { user:'you', text:'is the grain bowl at green quad still good' },
+      { user:'maya', text:'yes still solid, get there before noon though' },
+    ]},
+  };
+  let activeDm = 'jess';
+
+  function renderDmList(){
+    document.getElementById('dmList').innerHTML = Object.entries(dms).map(([key, d]) => `
+      <div class="group-item ${key === activeDm ? 'active' : ''}" onclick="selectDm('${key}')">
+        <div class="group-name">${d.name} ${d.online ? '<span class="online-dot"></span>' : ''}</div>
+        <div class="group-meta">${d.handle}</div>
+      </div>
+    `).join('');
+  }
+
+  function selectDm(key){
+    activeDm = key;
+    renderDmList();
+    renderDmChat();
+  }
+
+  function renderDmChat(){
+    const d = dms[activeDm];
+    document.getElementById('dmChat').innerHTML = `
+      <div class="chat-header">${d.name} ${d.online ? '<span class="online-dot"></span><span class="mono" style="font-size:10.5px;color:var(--gray);font-weight:400;">online</span>' : ''}</div>
+      <div class="chat-messages" id="dmMessages">
+        ${d.messages.map(m => `
+          <div class="chat-msg ${m.user === 'you' ? 'me' : ''}">
+            ${m.user !== 'you' ? `<div class="chat-sender">${d.name}</div>` : ''}
+            <div class="chat-bubble">${m.text}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="dmInput" placeholder="Message ${d.name}...">
+        <button onclick="sendDm()">Send</button>
+      </div>
+    `;
+    const box = document.getElementById('dmMessages');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function sendDm(){
+    const input = document.getElementById('dmInput');
+    const text = input.value.trim();
+    if(!text) return;
+    if(isFlaggedText(text)){
+      alert('That message was blocked by the content filter. Please rephrase — no slurs, hate speech, or inappropriate content.');
+      return;
+    }
+    dms[activeDm].messages.push({ user:'you', text });
+    input.value = '';
+    renderDmChat();
+  }
+
+  renderDmList();
+  renderDmChat();
+
+  renderPosts();
+  renderEvents();
+  renderMyEvents();
+  renderStudyGrid();
+  renderDiningGrid();
+  renderPeople();
+  renderRequests();
+  renderProfileWall();
+  updateSavedUI();
+
+  function setMapView(view){
+    const illustrated = document.getElementById('illustratedMap');
+    const satellite = document.getElementById('satelliteMap');
+    const btnI = document.getElementById('btnIllustrated');
+    const btnS = document.getElementById('btnSatellite');
+    if(view === 'illustrated'){
+      illustrated.style.display = 'block'; satellite.style.display = 'none';
+      btnI.classList.add('active'); btnS.classList.remove('active');
+    } else {
+      illustrated.style.display = 'none'; satellite.style.display = 'block';
+      btnS.classList.add('active'); btnI.classList.remove('active');
+    }
+  }
+
+  /* ---------- INTRO SPLASH ---------- */
+  // Fake terminal boot sequence before the app reveals itself. Purely cosmetic, but it
+  // keeps the same terminal/legal-brief identity used everywhere else in the app.
+  (function(){
+    const intro = document.getElementById('intro');
+    const log = document.getElementById('bootLog');
+    const reveal = document.getElementById('brandReveal');
+    const lines = [
+      '$ connecting to campus network',
+      '$ loading map, feed, people ... <span class="ok">ok</span>',
+      '$ syncing student data ... <span class="ok">ok</span>',
+    ];
+    let delay = 150;
+    lines.forEach((text, i) => {
+      setTimeout(() => {
+        const d = document.createElement('div');
+        d.innerHTML = text;
+        log.appendChild(d);
+      }, delay + i * 420);
+    });
+    setTimeout(() => { reveal.classList.add('show'); }, delay + lines.length * 420 + 200);
+
+    function finishIntro(){
+      intro.classList.add('hide');
+      document.body.classList.remove('intro-active');
+    }
+    const autoTimer = setTimeout(finishIntro, delay + lines.length * 420 + 1900);
+    intro.addEventListener('click', () => { clearTimeout(autoTimer); finishIntro(); });
+  })();
+
+  function updateProgress(){
+    const h = document.documentElement;
+    const scrolled = (h.scrollTop) / (h.scrollHeight - h.clientHeight) * 100;
+    const bar = document.getElementById('progressBar');
+    if(bar) bar.style.width = (isNaN(scrolled) ? 0 : scrolled) + '%';
+  }
+  window.addEventListener('scroll', updateProgress);
+  updateProgress();
+
+  /* ---------- ACCESSIBILITY: Escape closes any open modal ---------- */
+  document.addEventListener('keydown', (e) => {
+    if(e.key !== 'Escape') return;
+    document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+  });
+
+  /* ---------- DARK MODE ---------- */
+  // Because nearly every color in this file is a CSS variable, dark mode is just
+  // redefining those variables under a .dark-mode class instead of duplicating every rule.
+  function toggleDarkMode(){
+    document.body.classList.toggle('dark-mode');
+    const btn = document.getElementById('darkModeBtn');
+    btn.textContent = document.body.classList.contains('dark-mode') ? '☀️' : '🌙';
+  }
+</script>
+
+</body>
+</html>
