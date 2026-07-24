@@ -1,36 +1,40 @@
 <!--
-  CampusConnect — Platform Prototype
-  ===================================
-  Built by Alyssia Gaston (@alyssig), Computer Science student at UofSC.
+  hello!! its Alyssia!
 
-  What this is: a single-file, front-end-only prototype of CampusConnect —
-  a map, social feed, groups/DMs, events, study spot & dining directories,
-  content moderation, and a full trust & safety system, all in one place,
-  built to replace the patchwork of apps (GroupMe, word of mouth, etc.)
-  UofSC students currently piece campus life together with.
+  This is CampusConnect; essentially my answer to "why do I need 5 different
+  apps to survive a semester." GroupMe for my dorm floor/word of mouth for
+  which library floor is actually quiet/no real system for accessibility
+  stuff/zero central place for events... so I jst started building the
+  thing I wished existed. Map/feed/groups/DMs/events/dining/study spot/directories, even a whole trust & safety system w/ an actual strike
+  ladder. It got big fast ngl lol
 
-  Architecture: no framework, no build step — vanilla HTML/CSS/JS in one
-  file so it can be opened directly in a browser or dropped straight onto
-  Netlify. All state (posts, ratings, friends, RSVPs, saved spots) lives
-  in memory in the JavaScript section below and resets on refresh. That's
-  intentional for this stage — the real backend (Supabase: Postgres +
-  auth + storage) is the deliberate last step, once every feature is
-  fully designed and working against fake data first.
+  Heads up on how this is built: no React, no Vue, no build step; jst
+  plain HTML/CSS/JS in 1 (very looooong, sorry) file. That was a deliberate
+  call, not laziness; I wanted something I could open in a browser/drag onto Netlify w/ zero setup while I was iterating fast on design.
+  Everything (posts/likes/friends/RSVPs/saved spots;all of it) lives
+  in memory in the JS below, which means refreshing the page wipes it.
+  Thats on purpose for now. Wiring up a real backend (Supabase) is the
+  very last step, once every feature actually works the way I want it to
+  against fake data 1st. Building the real thing on top of a moving
+  target sounded like a LITERAL NIGHTMARE, so: fake data 1st, real database last.
 
-  Design system: garnet (#73000A) / black (#0B0B0C) / white — a "legal
-  brief meets code terminal" identity carried through every page: §
-  section markers, REF/CC-XX reference codes, terminal window chrome,
-  and a hand-illustrated campus map instead of a real geodata map.
+  Brand is garnet / black / white on purpose; went for "legal document
+  meets code terminal" as the overall aesthetic, which is why youll see § section
+  markers and REF/CC-XX style codes scattered everywhere instead of normal
+  labels. The campus map is hand illustrated, not a real map API, since I
+  wanted it to look like part of the brand instead of a random Google Maps
+  embed.
 
-  Known limitations (all intentional, not bugs):
-  - No persistence — refreshing the page resets everything.
-  - No real accounts — the "Alyssia Gaston" profile is a hardcoded demo user.
-  - The slur/profanity filter is a client-side word list for demo purposes
-    only; real moderation needs to run server-side (see the comment above
-    flaggedTerms further down for the full reasoning).
-  - Busy/quiet indicators are a time-of-day heuristic, not real foot traffic.
-  - Dark mode is a first pass — most elements are covered, a few decorative
-    corners may not be pixel-perfect yet.
+  Things that are intentionally not "done" yet, not bugs I missed:
+  - Nothing persists. Refresh = clean slate. See above, its a phase thing.
+  - The "Alyssia Gaston" profile is hardcoded; theres no real login yet.
+  - The word filter on the Guidelines page is a demo. A real 1 needs to
+    run server-side — I left a whole rant about why in a comment near
+    flaggedTerms if you want the details.
+  - "Busy right now" on Study Spots/Dining is a guess based on time of day,
+    not actual foot traffic data (I do't have sensors in the library lol).
+  - Dark mode is a first pass. Found most of the app, mightve missed a
+    corner or 2; if you spot one, congrats, you found a bug
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -42,6 +46,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Caveat:wght@600;700&family=Kalam:wght@400;700&family=Baloo+2:wght@600;700;800&family=Anton&display=swap" rel="stylesheet">
 <style>
+  /* every color in the whole app funnels through these variables — I learned
+     that lesson the hard way after hand-typing hex codes everywhere on an
+     earlier version and having to fix a color mistake in like 40 places */
   :root{
     --white:#FFFFFF; --paper:#F6F5F3; --black:#0B0B0C;
     --garnet:#73000A; --garnet-deep:#4A0007; --line:#D9D6D1; --gray:#55524D;
@@ -162,6 +169,9 @@
   .satellite-note a{ color:var(--garnet); }
 
   /* ---------- FEED (real pinboard aesthetic) ---------- */
+  /* this cork texture is 100% CSS, no image file — it's a base64 SVG noise
+     filter layered under a bunch of radial-gradient "specks." took forever
+     to get looking right but I refuse to ship a JPEG of cork texture */
   .corkboard{
     position:relative;
     background:
@@ -553,6 +563,9 @@
   .backend-note{ font-size:12.5px; color:var(--gray); margin-top:24px; border-top:1px dashed var(--line); padding-top:14px; max-width:420px; }
 
   /* ---------- MODALS (spot detail + report) ---------- */
+  /* every popup in app (report a spot, create a group, photo lightbox,
+     all of it) reuses this exact same overlay + box combo instead of me
+     writing custom modal CSS every single time I needed a popup */
   .modal-overlay{
     display:none; position:fixed; inset:0; z-index:250; background:rgba(11,11,12,0.55);
     align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto;
@@ -1314,27 +1327,29 @@
 
 <script>
   /*
-    A note on how this file is organized, since it's one big script tag:
+    quick heads up before u scroll thru this whole thing:
 
-    Each feature (Feed, Map, People, Groups, Events, etc.) follows the same
-    three-part pattern:
-      1. A data array/object holding that feature's fake data (e.g. `posts`,
-         `events`, `buildingData`).
-      2. A render function that rebuilds the relevant DOM from that data
-         (e.g. `renderPosts()`, `renderEvents()`).
-      3. Action functions the UI calls on click (e.g. `toggleLike()`,
-         `toggleRsvp()`) that mutate the data, then call the render function
-         again to reflect the change.
+    Every feature below (Feed, Map, People, Groups, Events, whatever) does
+    basically same 3 things, so once u spot pattern once
+    u've basically read whole file:
+      1. A fake data array/object sitting up top (`posts`, `events`,
+         `buildingData`, etc.)
+      2. A render function that rebuilds HTML from data
+         (`renderPosts()`, `renderEvents()`)
+      3. Little action functions buttons call (`toggleLike()`,
+         `toggleRsvp()`) that change data, then call render
+         function again so screen catches up.
 
-    That "mutate data, then re-render" loop is the same idea React/Vue give
-    you for free — it's just done by hand here since the app doesn't use a
-    framework. It's more code than a framework version, but it means this
-    can run as a single file with zero build tooling.
+    That's what React does for u automatically I'm
+    doing it by hand since theres no framework. Yes, its more typing.
+    No, I don't regret skipping framework, since it means anyone can
+    open this file/it just... works. No npm install, no build step,
+    no "works on my machine."
   */
 
   /* ---------- TAB SWITCHING ---------- */
-  // Single-page app: all tabs are pre-rendered in the DOM, we just toggle which .page
-  // has the 'active' class. No routing library needed for something this size.
+  // no router, no framework literally hiding/showing divs based on which nav
+  // button got clicked. Every tab already exists in DOM whole time
   function switchToPage(pageName){
     document.querySelectorAll('.tab-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.page === pageName);
@@ -1347,8 +1362,9 @@
   });
 
   /* ---------- GLOBAL SEARCH ---------- */
-  // Searches posts, people, groups, and events client-side by filtering in-memory arrays.
-  // Once there's a real backend this should move server-side (full-text search).
+  // search bar tht actually searches everything at once (posts, people, groups, events)
+  // instead of being decorative. Right now its jst Array.filter() on fake data — once
+  // theres real database this should become actual search query, not JS loop.
   function runGlobalSearch(query){
     const resultsEl = document.getElementById('globalSearchResults');
     const q = query.trim().toLowerCase();
@@ -1398,8 +1414,8 @@
   });
 
   /* ---------- NOTIFICATIONS ---------- */
-  // Static mock notifications for now — real ones would come from the backend once actions
-  // (likes, comments, friend requests) are actually persisted somewhere.
+  // these notifs are 100% fake, jst sitting here so bell icon has something to
+  // show. Real 1s need backend tht actually tracks who liked/commented/friend-requested what.
   function toggleNotifs(){
     document.getElementById('notifDropdown').classList.toggle('show');
   }
@@ -1409,8 +1425,9 @@
   });
 
   /* ---------- MAP: drag to pan ---------- */
-  // Hand-rolled drag-to-pan (no map library) since this is an illustrated SVG map, not real
-  // geodata. Tracks the mouse offset from wherever the drag started.
+  // I built my own drag-to-pan instead of using a map library because the map itself is a
+  // hand-drawn SVG, not real geodata — Google Maps API felt like overkill for a fake campus map.
+  // Basically just tracking how far the mouse moved since you clicked down.
   const viewport = document.getElementById('mapViewport');
   const canvas = document.getElementById('mapCanvas');
   let panX = -300, panY = -150, dragging = false, startX, startY;
@@ -1471,8 +1488,9 @@
   }
 
   /* ---------- REPORT AN ISSUE (map pins) ---------- */
-  // Lets students flag real problems (broken elevators, safety concerns) on the map.
-  // Pins are session-only for now; a real version would need these to persist and route somewhere.
+  // this 1 I'm lowkey proud of lets students drop pin for stuff like broken
+  // elevator or safety concern, right on map. For now pins vanish on refresh, but
+  // concept works end to end: pick category, pick building, describe it, done.
   const issueReports = [];
   let nextIssueId = 1;
 
@@ -1611,8 +1629,9 @@
 
 
   /* ---------- FEED ---------- */
-  // Core social feed: posts, likes, shares, comments. Everything lives in the `posts` array
-  // in memory, which is exactly why it resets on refresh — first thing to wire to a real backend.
+  // actual social feed. Posts, likes, shares, comments whole thing runs off 1
+  // `posts` array sitting in mem. which also exactly why refreshing page nukes it.
+  // this is priority #1 once backend goes in
   let posts = [
     { id:1, tag:'Study Spot', author:'junior_jess', time:'12m ago', title:'Hidden gem in Cooper', body:'The map room on floor 2 of Thomas Cooper is basically empty even during finals week. Bring headphones anyway.', likes:34, comments:[
       { user:'night_owl', text:'can confirm, been going here all week' },
@@ -1812,8 +1831,9 @@
   }
 
   /* ---------- PEOPLE ---------- */
-  // Mock student directory plus the friend request flow (send -> pending -> accept/decline),
-  // built to mirror how a real social graph would work once accounts exist.
+  // fake student directory + a friend request flow tht actually goes thru steps
+  // (send -> pending -> they accept or decline) instead of jst instantly "friending" people,
+  // which felt cheap/unrealistic lowkey.
   const people = [
     { id:1, name:'Jess Reyes', handle:'@junior_jess', meta:'Junior · Same dorm floor' },
     { id:2, name:'Maya Oduya', handle:'@carolina_eats', meta:'Sophomore · CS major' },
@@ -1889,8 +1909,8 @@
   }
 
   /* ---------- STUDY / DINING GRIDS ---------- */
-  // Shared rendering pattern for Study Spots and Dining: same card layout, same detail
-  // modal, just pointed at different data arrays.
+  // Study Spots/Dining are basically twins — same cards, same detail popup, I jst point
+  // same rendering code at 2 diff. arrays of data instead of writing everything twice.
   const studySpots = [
     { id:'study1', name:'Thomas Cooper Library (T-Coop)', ref:'CC-STUDY-01', note:'The icon, the moment. 7 levels — silent carrels on 1 and 3, reservable group rooms below. Packed during exams.', stars:4, photoHues:['#0B0B0C','#4a4a4c'], comments:[
       { user:'junior_jess', text:'Map room on floor 2 is empty even during finals, bring headphones.' },
@@ -1926,8 +1946,9 @@
     { id:'study23', name:'Cool Beans Coffee', ref:'CC-STUDY-23', note:'Just off campus, right across from the Horseshoe — cozy, multi-level, the unofficial 24th study spot.', stars:5, photoHues:['#0B0B0C','#4a4a4c'], comments:[] },
   ];
   /* ---------- EVENTS ---------- */
-  // Campus events with RSVP. Seed events have fake 'creator' info baked in; events a user
-  // creates pull the real name/photo from whatever's currently saved on the Profile page.
+  // Events + RSVP. sample events have made-up hosts baked into data, but if YOU
+  // create event, it actually pulls ur real name/photo from Profile page small
+  // detail, but it makes feature feel less fake once u use it urself.
   const events = [
     { id:'evt1', title:'CS Club Hackathon', tag:'Club', month:'AUG', day:'22', time:'6:00 PM', location:'Close-Hipp, Room 201', desc:'Overnight build event, teams of up to 4. Pizza and energy drinks provided. All majors welcome.', going:14, creator:{ name:'CS Club', handle:'@cs_club', avatar:'CC' } },
     { id:'evt2', title:'Gamecocks vs. Clemson — Watch Party', tag:'Athletics', month:'AUG', day:'28', time:'7:30 PM', location:'The Spur, Campus Village', desc:'Big screens, garnet face paint, free wings for the first 50 people.', going:62, creator:{ name:'The Spur', handle:'@thespur', avatar:'TS' } },
@@ -2137,7 +2158,8 @@
   function starString(n){ return '★'.repeat(n) + '☆'.repeat(5-n); }
 
   /* ---------- SAVED SPOTS ---------- */
-  // Bookmarking for Study Spots/Dining, tied to the Profile page's saved list and live count.
+  // lil star/bookmark button so u can save spot 4 later updates ur Profile's
+  // saved list/count on it in real time
   const savedSpots = {};
   function toggleSaveSpot(id, event){
     if(event) event.stopPropagation();
@@ -2164,8 +2186,9 @@
   }
 
   /* ---------- BUSY / QUIET INDICATOR ---------- */
-  // Not real foot-traffic data. This is a time-of-day heuristic (rush hours for dining,
-  // study hours for libraries) that approximates how busy a spot usually is.
+  // full disclosure: this is NOT real foot-traffic data (I dont have sensors in Cooper
+  // Library, sadly...sigh). Its jst guess based on time of day — dining spots read
+  // busy during actual meal times, study spots read busy during actual finals-week hours.
   function computeBusyLevel(isDining){
     const hour = new Date().getHours();
     let level;
@@ -2306,8 +2329,8 @@
   }
 
   /* ---------- SPOT DETAIL MODAL (photos, video, comments) ---------- */
-  // The big modal that powers every Study Spot/Dining card: photo gallery, hours/menu,
-  // video placeholder, comments, and (further down) the interactive star rating.
+  // ths is THE BIG 1 — popup tht opens when u click any Study Spot/Dining
+  // card. Photos, hours, menu, comments, star rating, all of it lives here.
   const allSpots = [...studySpots, ...diningSpots];
   let activeSpot = null;
 
@@ -2403,8 +2426,10 @@
   }
 
   /* ---------- RATING ---------- */
-  // Weighted-average rating: assumes each spot already has ~10 ratings, then blends the
-  // user's new rating into that average. A real backend would just average real DB rows instead.
+  // my hacky-but-honest star rating math: I pretend evry spot already has ~10 ratings,
+  // then blend ur new 1 into that average so # moves believable amount instead
+  // of jumping wildly. Once theres a real database whole function goes away  u'd
+  // jst average real rows in table
   const userRatings = {};
   function rateSpot(id, stars){
     const s = allSpots.find(sp => sp.id === id);
@@ -2425,8 +2450,9 @@
   }
 
   /* ---------- PHOTO LIGHTBOX ---------- */
-  // Clicking any photo opens it full-size with its own separate comment thread, so a
-  // comment about a specific photo doesn't get mixed into the spot's general comments.
+  // click any photo, it opens fullsize w/ ITS OWN comment thread sep. from
+  // spots general comments. Small thing, but I liked tht comment abt specific photo
+  // doesnt get buried in general discussion
   let activePhotoIndex = null;
   function openPhotoLightbox(index){
     activePhotoIndex = index;
@@ -2534,8 +2560,9 @@
   }
 
   /* ---------- REPORT SYSTEM ---------- */
-  // One generic report modal reused everywhere (comments, users, photos) via
-  // openReportModal(target). Ties into the enforcement ladder described on the Guidelines page.
+  // 1 report modal, reused literally everywhere (comments, users, photos) instead of
+  // building sep. 1 4 each. jst pass in what ur reporting/it handles
+  // rest. Ties into whole strike-ladder system on Guidelines page.
   let reportTarget = '';
   let reportScreenshot = null;
   function openReportModal(target){
@@ -2570,8 +2597,9 @@
 
 
   /* ---------- PROFILE ---------- */
-  // Profile editing (name/bio/photo) plus the 'My Activity' rollup: saved spots, RSVP'd
-  // events, and your own posts, all pulled into one place instead of scattered across tabs.
+  // profile page — edit ur name/bio/photo, & further down, everything uve done on
+  // app (saved spots, RSVP'd events, your posts) pulled into 1 spot instead of making
+  // ppl hunt across 5 different tabs 2 see their stuff
   function handlePhoto(e){
     const file = e.target.files[0];
     if(!file) return;
@@ -2588,8 +2616,9 @@
   }
 
   /* ---------- GROUPS (GroupMe-style) ---------- */
-  // GroupMe-style group chat. Groups are stored as an object keyed by id (not an array)
-  // so we can look a specific group's messages up directly instead of searching for it.
+  // this is my "why use GroupMe when it could jst be built in" pitch, essentially. Groups
+  // live as object keyed via ID (not array) purely so I can grab specific groups
+  // messages instantly instead of looping thru 2 find it
   const groups = {
     preston3: { name:'Preston 3rd Floor', meta:'42 members · Dorm', messages:[
       { user:'RA Maya', text:'Floor meeting moved to 7pm tonight in the lounge!' },
@@ -2698,15 +2727,15 @@
   }
 
   /* ---------- TRUST & SAFETY DEMO ----------
-     NOTE: this is a CLIENT-SIDE DEMO ONLY, built to show the concept.
-     Real moderation must run server-side — anyone can view this page's
-     source and see (or edit around) a client-side list. A production
-     version should call a maintained moderation service (e.g. a hate-speech/
-     profanity detection API) instead of a hardcoded word list, since hand-
-     maintained lists go stale and are trivially bypassed. This demo does
-     include real examples of racial slurs, homophobic/transphobic slurs,
-     and other slurs/derogatory terms so the concept can actually be tested,
-     plus basic normalization to catch spacing and leetspeak tricks. */
+     real talk: this is a DEMO; not real moderation. its jst a JS array
+     sitting in file anyone can open/read (or copy the list from and
+     dodge). a real version needs to run server-side using actual
+     moderation service not word list I typed by hand--hand-maintained
+     lists get stale fast/people get around them in abt 5 mins.
+     I did however put REAL slurs in here (racial, homophobic/transphobic, etc.)
+     plus some normalization to catch spacing/leetspeak tricks, cuz a
+     filter demo tht only blocks fake placeholder words doesnt prove
+     anything works. */
   const flaggedTerms = [
     'nigger','nigga','chink','gook','spic','wetback','beaner','coon','kike',
     'towelhead','raghead','faggot','fag','tranny','dyke','retard','slut','whore',
@@ -2748,8 +2777,8 @@
 
 
   /* ---------- MESSAGES (DMs) ---------- */
-  // 1:1 direct messages. Same rendering pattern as Groups below, just keyed by contact
-  // instead of by group id.
+  // same idea as Groups but 4 1:1 DMs instead of group chats--Copy-pasted a lot of
+  // logic honestly, jst swapped "group" 4 "contact"
   const dms = {
     jess: { name:'Jess Reyes', handle:'@junior_jess', online:true, messages:[
       { user:'jess', text:'hey are you going to the CS club meeting thursday?' },
@@ -2843,8 +2872,9 @@
   }
 
   /* ---------- INTRO SPLASH ---------- */
-  // Fake terminal boot sequence before the app reveals itself. Purely cosmetic, but it
-  // keeps the same terminal/legal-brief identity used everywhere else in the app.
+  // merely 4 vibes; fake terminal boot-up animation before u see actual app
+  // does absolutely nothing functional, just thought it was fun way 2 open given whole
+  // comp-sci-meets-legal-brief aesthetic I was going 4
   (function(){
     const intro = document.getElementById('intro');
     const log = document.getElementById('bootLog');
@@ -2881,15 +2911,19 @@
   window.addEventListener('scroll', updateProgress);
   updateProgress();
 
-  /* ---------- ACCESSIBILITY: Escape closes any open modal ---------- */
+  /* ---------- press Escape to close whatever modal is open ----------
+     small thing but it bugged me that keyboard-only users had no way to
+     back out of a modal without a mouse. this fixes that for all of them
+     at once instead of adding it to every single modal individually. */
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape') return;
     document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
   });
 
   /* ---------- DARK MODE ---------- */
-  // Because nearly every color in this file is a CSS variable, dark mode is just
-  // redefining those variables under a .dark-mode class instead of duplicating every rule.
+  // the overall whole payoff of using CSS variables 4 LITERALLY EVERY color in file: dark mode
+  // is jst redefining those variables under 1 .dark-mode class instead of writing a whole
+  // 2nd stylesheet. Past-me being lazy w/ variables saved present-me a lot of pain here lol
   function toggleDarkMode(){
     document.body.classList.toggle('dark-mode');
     const btn = document.getElementById('darkModeBtn');
